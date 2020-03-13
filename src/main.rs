@@ -56,10 +56,11 @@ impl Default for LBool {
 
 bitfield! {
     pub struct ClauseHeader(u32);
-    get_mark, set_mark :3, 0;
-    get_learnt, set_learnt :1, 4;
+    get_mark, set_mark :2, 0;
+    get_learnt, set_learnt :1, 3;
+    get_extra_data, set_extra_data :1, 4;
     get_reloced, set_reloced :1, 5;
-    get_size, set_size :26, 6;
+    get_size, set_size :27, 6;
 }
 
 type ClauseHeaderOffset = i32;
@@ -201,20 +202,17 @@ impl OrderHeap {
 }
 
 struct ClauseDatabase {
-    clauses: Vec<ClauseHeaderOffset>,
-    learnts: Vec<ClauseHeaderOffset>,
     clause_data: Vec<u32>,
 }
 
 impl ClauseDatabase {
-    fn add_normal(&mut self, lits :&[Lit]) -> ClauseHeaderOffset {
+    fn add_clause(&mut self, lits :&[Lit], extra_data :bool) -> ClauseHeaderOffset {
         let header_size = std::mem::size_of::<ClauseHeader>();
         let data_size = lits.len();
-
         
-        // TODO Has_extra
         let mut header = ClauseHeader(0);
         header.set_size(data_size as u32);
+        header.set_extra_data(extra_data as u32);
         let header = header;
 
         let cref = self.clause_data.len() as i32;
@@ -225,8 +223,22 @@ impl ClauseDatabase {
             std::slice::from_raw_parts(lits.as_ptr() as *const Lit as *const u32, lits.len())
         });
 
-        self.clauses.push(cref);
+        if extra_data {
+            self.clause_data.push(unsafe {
+                std::mem::transmute::<f32,u32>(0.0)
+            });
+        }
+
         cref
+    }
+
+    fn get_activity<'a>(&'a mut self, header_addr :ClauseHeaderOffset) -> &'a mut f32 {
+        let header = self.get_header(header_addr);
+        unsafe {
+            let ptr = (self.clause_data.get_mut(header_addr as usize).unwrap() as *mut u32 as *mut f32)
+                .offset((1 + header.get_size()) as isize  *std::mem::size_of::<u32>() as isize);
+            &mut *ptr
+        }
     }
 
     fn get_header(&self, header_addr :ClauseHeaderOffset) -> ClauseHeader {
@@ -258,6 +270,8 @@ pub struct Solver {
 
     // solver state
     clause_database :ClauseDatabase,
+    clauses: Vec<ClauseHeaderOffset>,
+    learnts: Vec<ClauseHeaderOffset>,
 
     trail: Vec<Lit>,
     trail_lim: Vec<i32>,
@@ -373,10 +387,10 @@ impl Solver {
             watch_dirties: Vec::new(),
 
             clause_database: ClauseDatabase {
-                clauses: Vec::new(),
-                learnts: Vec::new(),
                 clause_data: Vec::new(),
             },
+            clauses: Vec::new(),
+            learnts: Vec::new(),
 
             order_heap: OrderHeap {
                 heap: Vec::new(),
@@ -531,6 +545,18 @@ impl Solver {
         self.cla_inc *= (1.0 / self.params.clause_decay);
     }
 
+    fn clause_bump_activity(&mut self, cref :ClauseHeaderOffset) {
+        let activity = self.clause_database.get_activity(cref);
+        *activity += self.cla_inc as f32;
+        if *activity > 1e20 {
+            // rescale
+            for p in self.learnts.iter() {
+                *self.clause_database.get_activity(*p) *= 1e-20;
+            }
+            self.cla_inc *= 1e-20;
+        }
+    }
+
     fn release_var(&mut self, l :Lit) {
         if self.lit_value(l) == LBool::Undef {
             self.add_clause(std::iter::once(l));
@@ -581,7 +607,8 @@ impl Solver {
             self.ok = self.propagate() == CLAUSE_NONE;
             return self.ok;
         } else {
-            let cref = self.clause_database.add_normal(&self.add_tmp);
+            let cref = self.clause_database.add_clause(&self.add_tmp, false);
+            self.clauses.push(cref);
             self.attach_clause(cref);
         }
 
@@ -589,11 +616,8 @@ impl Solver {
     }
 
     fn attach_clause(&mut self, cref :ClauseHeaderOffset) {
-        unimplemented!()
-    }
-
-    fn clause_bump_activity(&mut self, c :ClauseHeaderOffset) {
-        unimplemented!()
+        let header = self.clause_database.get_header(cref);
+        assert!(header.get_size() > 1);
     }
 
 
