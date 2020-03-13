@@ -1,3 +1,5 @@
+use bitfield::bitfield;
+
 // ------
 // Variables and literals
 // ------
@@ -20,6 +22,10 @@ impl Lit {
 
     fn var(&self) -> Var {
         Var(self.0 >> 1)
+    }
+
+    fn inverse(&self) -> Lit {
+        Self::new(self.var(), !self.sign())
     }
 }
 
@@ -48,24 +54,26 @@ impl Default for LBool {
 
 // TODO &&, ||
 
-pub struct Clause {
-    mark: u8,
-    learnt: bool,
-    has_extra: bool,
-    reloced: bool,
-    size: usize,
+bitfield! {
+    pub struct ClauseHeader(u32);
+    get_mark, set_mark :3, 0;
+    get_learnt, set_learnt :1, 4;
+    get_reloced, set_reloced :1, 5;
+    get_size, set_size :26, 6;
 }
 
-type ClauseRef = usize; // TODO
+type ClauseHeaderOffset = i32;
+const CLAUSE_NONE: ClauseHeaderOffset = -1;
 
 type VMap<T> = Vec<T>;
 type LSet = Vec<u8>; // ???
 
 #[derive(Default, Copy, Clone)]
 struct VariableData {
-    reason: Option<ClauseRef>,
+    reason: ClauseHeaderOffset,
     level: i32,
 }
+
 
 struct ShrinkStackElem {
     i: u32,
@@ -192,6 +200,53 @@ impl OrderHeap {
     }
 }
 
+struct ClauseDatabase {
+    clauses: Vec<ClauseHeaderOffset>,
+    learnts: Vec<ClauseHeaderOffset>,
+    clause_data: Vec<u32>,
+}
+
+impl ClauseDatabase {
+    fn add_normal(&mut self, lits :&[Lit]) -> ClauseHeaderOffset {
+        let header_size = std::mem::size_of::<ClauseHeader>();
+        let data_size = lits.len();
+
+        
+        // TODO Has_extra
+        let mut header = ClauseHeader(0);
+        header.set_size(data_size as u32);
+        let header = header;
+
+        let cref = self.clause_data.len() as i32;
+        self.clause_data.push(unsafe {
+            std::mem::transmute::<ClauseHeader,u32>(header)
+        });
+        self.clause_data.extend(unsafe {
+            std::slice::from_raw_parts(lits.as_ptr() as *const Lit as *const u32, lits.len())
+        });
+
+        self.clauses.push(cref);
+        cref
+    }
+
+    fn get_header(&self, header_addr :ClauseHeaderOffset) -> ClauseHeader {
+        assert!(header_addr >= 0);
+        assert_eq!(std::mem::size_of::<ClauseHeader>(), std::mem::size_of::<u32>());
+        let val = self.clause_data[header_addr as usize];
+        unsafe {
+            std::mem::transmute::<u32,ClauseHeader>(val)
+        }
+    }
+
+    fn get_lits<'a>(&'a self, header_addr :ClauseHeaderOffset, size :usize) -> &'a [Lit] {
+        unsafe {
+            let ptr = (&self.clause_data[header_addr as usize] as *const u32 as *const Lit)
+                .offset(std::mem::size_of::<ClauseHeader>() as isize);
+            std::slice::from_raw_parts(ptr, size)
+        }
+    }
+}
+
 pub struct Solver {
     pub verbosity: u32,
     // Extra results (read-only for consumer)
@@ -202,8 +257,8 @@ pub struct Solver {
     pub stats: SolverStatistics,
 
     // solver state
-    clauses: Vec<ClauseRef>,
-    learnts: Vec<ClauseRef>,
+    clause_database :ClauseDatabase,
+
     trail: Vec<Lit>,
     trail_lim: Vec<i32>,
     assumptions: Vec<Lit>,
@@ -231,7 +286,6 @@ pub struct Solver {
     progress_estimate: f64,
     remove_satisfied: bool,
     next_var: i32,
-    clause_arena: (), // TODO
 
     released_vars: Vec<Var>,
     free_vars: Vec<Var>,
@@ -318,6 +372,12 @@ impl Solver {
             watch_dirty: Vec::new(),
             watch_dirties: Vec::new(),
 
+            clause_database: ClauseDatabase {
+                clauses: Vec::new(),
+                learnts: Vec::new(),
+                clause_data: Vec::new(),
+            },
+
             order_heap: OrderHeap {
                 heap: Vec::new(),
                 indices: Vec::new(),
@@ -340,12 +400,9 @@ impl Solver {
             analyze_toclear: Vec::new(),
             assigns: Vec::new(),
             assumptions: Vec::new(),
-            clause_arena: (), // TODO
             conflict: Vec::new(),
-            clauses: Vec::new(),
             decision: Vec::new(),
             free_vars: Vec::new(),
-            learnts: Vec::new(),
             learntsize_adjust_cnt: 0,
             learntsize_adjust_confl: 0.0,
             max_learnts: 0.0,
@@ -369,9 +426,7 @@ impl Solver {
         let var = if let Some(var) = self.free_vars.pop() {
             var
         } else {
-            let idx = self.next_var;
-            self.next_var += 1;
-            Var(idx)
+            Var((self.next_var, self.next_var += 1).0)
         };
 
         map_insert(
@@ -488,19 +543,65 @@ impl Solver {
     }
 
     fn lit_value(&self, lit :Lit) -> LBool {
-        LBool::xor(&self.assigns[lit.var().0 as usize], lit.sign())
+        Self::assigns_lit_value(&self.assigns, lit)
+    }
+
+    fn assigns_lit_value(assigns :&Vec<LBool>, lit :Lit) -> LBool {
+        LBool::xor(&assigns[lit.var().0 as usize], lit.sign())
     }
 
     fn add_clause(&mut self, ps :impl Iterator<Item = Lit>) -> bool {
         assert!(self.trail_lim.len() == 0);
         if !self.ok { return false; }
 
-        add_tmp.clear();
-        add_tmp.extend(ps);
-        add_tmp.sort();
+        self.add_tmp.clear();
+        self.add_tmp.extend(ps);
+        self.add_tmp.sort();
+        {
+            let mut prev = LIT_UNDEF;
+            let mut already_sat = false;
+            let add_tmp = &mut self.add_tmp;
+            let assigns = &self.assigns;
+            add_tmp.retain(|l| {
+                if Self::assigns_lit_value(assigns, *l) == LBool::False || *l == prev.inverse() {
+                    already_sat = true;
+                }
+                !(   /* dedup */ (prev, prev=*l).0 == *l
+                  || /* known */ Self::assigns_lit_value(assigns, *l) == LBool::True)
+            });
+
+            if already_sat { return true; }
+        }
+
+        if self.add_tmp.len() == 0  {
+            self.ok = false;
+            return false;
+        } else if self.add_tmp.len() == 1 {
+            self.unchecked_enqueue(self.add_tmp[0]);
+            self.ok = self.propagate() == CLAUSE_NONE;
+            return self.ok;
+        } else {
+            let cref = self.clause_database.add_normal(&self.add_tmp);
+            self.attach_clause(cref);
+        }
+
+        true
     }
 
-    fn clause_bump_activity(&mut self, c :ClauseRef) {
+    fn attach_clause(&mut self, cref :ClauseHeaderOffset) {
+        unimplemented!()
+    }
+
+    fn clause_bump_activity(&mut self, c :ClauseHeaderOffset) {
+        unimplemented!()
+    }
+
+
+    fn unchecked_enqueue(&mut self, lit :Lit) {
+        unimplemented!()
+    }
+
+    fn propagate(&mut self) -> ClauseHeaderOffset {
         unimplemented!()
     }
 }
