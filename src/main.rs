@@ -926,8 +926,79 @@ impl Solver {
         out_level
     }
 
-    fn lit_redundant(&mut self, lit: Lit) -> bool {
-        unimplemented!()
+    fn lit_redundant(&mut self, p: Lit) -> bool {
+        #[repr(i8)]
+        enum Seen {
+            Undef = 0,
+            Source = 1,
+            Removable = 2,
+            Failed = 3,
+        }
+
+        assert!(
+            self.seen[p.var().idx()] == Seen::Undef as i8
+                || self.seen[p.var().idx()] == Seen::Source as i8
+        );
+        assert!(self.vardata[p.var().idx()].reason != CLAUSE_NONE);
+
+        self.analyze_stack.clear();
+
+        let mut i = 1;
+        let mut p = p;
+        'outer: loop {
+
+            let reason = self.vardata[p.var().idx()].reason;
+            let header = self.clause_database.get_header(reason);
+            let lits = self
+                .clause_database
+                .get_lits(reason, header.get_size() as usize);
+
+            if i < header.get_size() {
+                // checking 'p'-parents 'l':
+                let l = lits[i as usize];
+
+                // variable at level 0 or previously removable
+                if self.vardata[l.var().idx()].level == 0
+                    || self.seen[l.var().idx()] == Seen::Source as i8
+                    || self.seen[l.var().idx()] == Seen::Removable as i8
+                {
+                    continue;
+                }
+
+                // Check variable can not be removed for some local reason
+                if self.vardata[l.var().idx()].reason == CLAUSE_NONE || self.seen[l.var().idx()] == Seen::Failed as i8 {
+                    self.analyze_stack.push(ShrinkStackElem { i: 0, l: p });
+                    for elem in self.analyze_stack.iter() {
+                        if self.seen[elem.l.var().idx()] == Seen::Undef as i8 {
+                            self.seen[elem.l.var().idx()] = Seen::Failed as i8;
+                            self.analyze_toclear.push(elem.l);
+                        }
+                    }
+
+                    return false;
+                }
+
+                // recursively check 'l':
+                self.analyze_stack.push(ShrinkStackElem { i: i, l: p });
+                i = 0;
+                p = l;
+            } else {
+                // finished with current element 'p' and reason 'c':
+                if self.seen[p.var().idx()] == Seen::Undef as i8 {
+                    self.seen[p.var().idx()] = Seen::Removable as i8;
+                    self.analyze_toclear.push(p);
+                }
+
+                if let Some(elem) = self.analyze_stack.pop() {
+                    i = elem.i;
+                    p = elem.l;
+                } else {
+                    return true; // success if stack is empty
+                }
+            }
+
+            i += 1;
+        }
     }
 
     fn unchecked_enqueue(&mut self, lit: Lit, reason: ClauseHeaderOffset) {
