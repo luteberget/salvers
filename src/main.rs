@@ -90,7 +90,7 @@ struct ShrinkStackElem {
 }
 
 // derive copy?
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Copy)]
 struct Watcher {
     cref: ClauseHeaderOffset,
     blocker: Lit,
@@ -288,13 +288,21 @@ impl ClauseDatabase {
             std::slice::from_raw_parts(ptr, size)
         }
     }
+
+    fn get_lits_mut<'a>(&'a mut self, header_addr: ClauseHeaderOffset, size: usize) -> &'a mut [Lit] {
+        unsafe {
+            let ptr = (self.clause_data.get_mut(header_addr as usize).unwrap() as *mut u32 as *mut Lit)
+                .offset(std::mem::size_of::<ClauseHeader>() as isize);
+            std::slice::from_raw_parts_mut(ptr, size)
+        }
+    }
 }
 
 pub struct Solver {
     pub verbosity: u32,
     // Extra results (read-only for consumer)
     pub model: Vec<LBool>,
-    pub conflict: LSet,
+    pub conflict: Vec<Lit>,
 
     pub params: SolverParams,
     pub stats: SolverStatistics,
@@ -946,7 +954,6 @@ impl Solver {
         let mut i = 1;
         let mut p = p;
         'outer: loop {
-
             let reason = self.vardata[p.var().idx()].reason;
             let header = self.clause_database.get_header(reason);
             let lits = self
@@ -966,7 +973,9 @@ impl Solver {
                 }
 
                 // Check variable can not be removed for some local reason
-                if self.vardata[l.var().idx()].reason == CLAUSE_NONE || self.seen[l.var().idx()] == Seen::Failed as i8 {
+                if self.vardata[l.var().idx()].reason == CLAUSE_NONE
+                    || self.seen[l.var().idx()] == Seen::Failed as i8
+                {
                     self.analyze_stack.push(ShrinkStackElem { i: 0, l: p });
                     for elem in self.analyze_stack.iter() {
                         if self.seen[elem.l.var().idx()] == Seen::Undef as i8 {
@@ -1001,6 +1010,43 @@ impl Solver {
         }
     }
 
+    fn analyze_final(&mut self, p: Lit) {
+        // TODO here we have just a vec of lits, instead of minisat's redundant intmap+vec structure
+        self.conflict.clear();
+        self.conflict.push(p);
+
+        if self.trail_lim.len() == 0 {
+            return;
+        }
+
+        self.seen[p.var().idx()] = 1;
+
+        let mut i: usize = self.trail.len() - 1;
+        while i >= self.trail_lim[0] as usize {
+            let var = self.trail[i].var();
+            if self.seen[var.idx()] > 0 {
+                let reason = self.vardata[var.idx()].reason;
+                if reason == CLAUSE_NONE {
+                    assert!(self.vardata[var.idx()].level > 0);
+                    self.conflict.push(self.trail[i].inverse());
+                } else {
+                    let header = self.clause_database.get_header(reason);
+                    let lits = self
+                        .clause_database
+                        .get_lits(reason, header.get_size() as usize);
+                    for l in lits.iter().skip(1) {
+                        if self.vardata[l.var().idx()].level > 0 {
+                            self.seen[l.var().idx()] = 1;
+                        }
+                    }
+                }
+            }
+            i -= 1;
+        }
+
+        self.seen[p.var().idx()] = 0;
+    }
+
     fn unchecked_enqueue(&mut self, lit: Lit, reason: ClauseHeaderOffset) {
         assert!(self.lit_value(lit) == LBool::Undef);
         self.assigns[lit.var().0 as usize] = LBool::from_bool(lit.sign());
@@ -1012,7 +1058,90 @@ impl Solver {
     }
 
     fn propagate(&mut self) -> ClauseHeaderOffset {
+        let mut conflict_clause = CLAUSE_NONE;
+        let mut num_props = 0;
+
+        while self.qhead < self.trail.len() {
+            let p = self.trail[self.qhead];
+            self.qhead += 1;
+
+            self.clean_watch(p);
+
+            num_props += 1;
+
+            let (mut i, mut j) = (0, 0);
+            'for_each_watch: while i < self.watch_occs[p.0 as usize].len() {
+                let assigns = &self.assigns;
+                let watches = &mut self.watch_occs[p.0 as usize];
+                let watch_i = watches[i];
+                if Self::assigns_lit_value(assigns, watch_i.blocker) == LBool::True {
+                    watches[j] = watch_i;
+                    j += 1;
+                    i += 1; 
+                    continue;
+                }
+
+                // Make sure the false literal is clause_lits[1].
+                let header = self.clause_database.get_header(watch_i.cref);
+                let lits = self.clause_database.get_lits_mut(watch_i.cref, header.get_size() as usize);
+                let false_lit = p.inverse();
+                if lits[0] == false_lit {
+                    lits.swap(0,1);
+                }
+                assert!(lits[1] == false_lit);
+
+                i += 1;
+
+                let first = lits[0];
+                let w = Watcher { cref: watch_i.cref, blocker: first };
+                // If 0th watch is true, then the clause is already satisfied
+                if first != watch_i.blocker && Self::assigns_lit_value(assigns, first) == LBool::True {
+                    watches[j] = w;
+                    j += 1;
+                    continue;
+                }
+
+                // Look for new watch:
+                let mut k = 2;
+                while k < lits.len() {
+                    if Self::assigns_lit_value(assigns, lits[k]) != LBool::False {
+                        lits[1] = lits[k];
+                        lits[k] = false_lit;
+                        self.watch_occs[lits[1].inverse().0 as usize].push(w);
+                        continue 'for_each_watch;
+                    } else {
+                        k += 1;
+                    }
+                }
+
+                // Did not find watch -- clause is unit under assignment:
+                watches[j] = w;
+                j += 1;
+                if Self::assigns_lit_value(assigns, first) == LBool::False {
+                    conflict_clause = watch_i.cref;
+                    self.qhead = self.trail.len();
+                    while i < self.watch_occs[p.0 as usize].len() {
+                        self.watch_occs[p.0 as usize][j] = watch_i;
+                        j += 1;
+                        i += 1; 
+                    }
+                } else {
+                    self.unchecked_enqueue(first, watch_i.cref);
+                }
+            }
+        }
+
         unimplemented!()
+    }
+
+    fn clean_watch(&mut self, lit: Lit) {
+        if self.watch_dirty[lit.0 as usize] == 0 {
+            return;
+        }
+        let db = &self.clause_database;
+        self.watch_occs[lit.0 as usize]
+            .retain(|w| db.get_header(w.cref).get_mark() != 1);
+        self.watch_dirty[lit.0 as usize] = 0;
     }
 }
 
