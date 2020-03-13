@@ -14,8 +14,12 @@ impl Lit {
         Lit(2 * var + sign as i32)
     }
 
-    pub fn sign(&self) -> bool {
+    fn sign(&self) -> bool {
         ((self.0) & 1) != 0
+    }
+
+    fn var(&self) -> Var {
+        Var(self.0 >> 1)
     }
 }
 
@@ -25,9 +29,15 @@ pub const LIT_ERROR: Lit = Lit(-1);
 #[repr(u8)]
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum LBool {
-    True,
-    False,
-    Undef,
+    False = 0,
+    True = 1,
+    Undef = 2,
+}
+
+impl LBool {
+    fn xor(&self, b :bool) -> LBool {
+        unsafe { std::mem::transmute((*self as u8) ^ (b as u8)) }
+    }
 }
 
 impl Default for LBool {
@@ -127,12 +137,12 @@ impl OrderHeap {
 
     pub fn contains(&self, Var(var) :Var) -> bool { (var as usize) < self.indices.len() && self.indices[var as usize] == 1 }
 
-    pub fn decreased(&mut self, key :Var, act :&[f64]) {
+    pub fn decrease(&mut self, key :Var, act :&[f64]) {
         debug_assert!(self.contains(key));
         self.percolate_up(self.indices[key.0 as usize], act);
     }
 
-    pub fn increased(&mut self, key :Var, act :&[f64]) {
+    pub fn increase(&mut self, key :Var, act :&[f64]) {
         debug_assert!(self.contains(key));
         self.percolate_down(self.indices[key.0 as usize], act);
     }
@@ -433,6 +443,64 @@ impl Solver {
     }
 
     fn insert_var_order(&mut self, var: Var) {
+        if !self.order_heap.contains(var) && self.decision[var.0 as usize] == 1 {
+            self.order_heap.insert(var, &self.activity);
+        }
+    }
+
+    fn var_decay_activity(&mut self) {
+        self.var_inc *= (1.0 / self.params.var_decay);
+    }
+
+    fn var_bump_activity_default(&mut self, var :Var) {
+        self.var_bump_activity(var, self.var_inc);
+    }
+
+    fn var_bump_activity(&mut self, var :Var, inc :f64) {
+        self.activity[var.0 as usize] += inc;
+        if self.activity[var.0 as usize] > 1e100 {
+            // rescale
+            for act in &mut self.activity {
+                *act *= 1e-100;
+            }
+            self.var_inc *= 1e-100;
+        }
+
+        // update heap
+        if self.order_heap.contains(var) {
+            self.order_heap.decrease(var, &self.activity);
+        }
+    }
+
+    fn clause_decay_activity(&mut self) {
+        self.cla_inc *= (1.0 / self.params.clause_decay);
+    }
+
+    fn release_var(&mut self, l :Lit) {
+        if self.lit_value(l) == LBool::Undef {
+            self.add_clause(std::iter::once(l));
+            self.released_vars.push(l.var());
+        }
+    }
+
+    fn var_value(&self, var :Var) -> LBool {
+        self.assigns[var.0 as usize]
+    }
+
+    fn lit_value(&self, lit :Lit) -> LBool {
+        LBool::xor(&self.assigns[lit.var().0 as usize], lit.sign())
+    }
+
+    fn add_clause(&mut self, ps :impl Iterator<Item = Lit>) -> bool {
+        assert!(self.trail_lim.len() == 0);
+        if !self.ok { return false; }
+
+        add_tmp.clear();
+        add_tmp.extend(ps);
+        add_tmp.sort();
+    }
+
+    fn clause_bump_activity(&mut self, c :ClauseRef) {
         unimplemented!()
     }
 }
