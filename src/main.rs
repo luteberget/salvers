@@ -4,11 +4,17 @@ use bitfield::bitfield;
 // Variables and literals
 // ------
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct Var(i32);
 const VAR_UNDEF: Var = Var(-1);
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+impl Var {
+    fn idx(&self) -> usize {
+        self.0 as usize
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Lit(i32);
 
 impl Lit {
@@ -41,8 +47,11 @@ pub enum LBool {
 }
 
 impl LBool {
-    fn xor(&self, b :bool) -> LBool {
+    fn xor(&self, b: bool) -> LBool {
         unsafe { std::mem::transmute((*self as u8) ^ (b as u8)) }
+    }
+    fn from_bool(b: bool) -> LBool {
+        unsafe { std::mem::transmute(b) }
     }
 }
 
@@ -75,7 +84,6 @@ struct VariableData {
     level: i32,
 }
 
-
 struct ShrinkStackElem {
     i: u32,
     l: Lit,
@@ -84,7 +92,7 @@ struct ShrinkStackElem {
 // derive copy?
 #[derive(Clone, PartialEq, Eq)]
 struct Watcher {
-    cref: u32,
+    cref: ClauseHeaderOffset,
     blocker: Lit,
 }
 
@@ -94,6 +102,10 @@ struct OrderHeap {
 }
 
 impl OrderHeap {
+    pub fn is_empty(&self) -> bool {
+        self.heap.is_empty()
+    }
+
     pub fn left(i: i32) -> i32 {
         i * 2 + 1
     }
@@ -144,27 +156,30 @@ impl OrderHeap {
         self.indices[var.0 as usize] = i;
     }
 
-    pub fn contains(&self, Var(var) :Var) -> bool { (var as usize) < self.indices.len() && self.indices[var as usize] == 1 }
+    pub fn contains(&self, Var(var): Var) -> bool {
+        (var as usize) < self.indices.len() && self.indices[var as usize] == 1
+    }
 
-    pub fn decrease(&mut self, key :Var, act :&[f64]) {
+    pub fn decrease(&mut self, key: Var, act: &[f64]) {
         debug_assert!(self.contains(key));
         self.percolate_up(self.indices[key.0 as usize], act);
     }
 
-    pub fn increase(&mut self, key :Var, act :&[f64]) {
+    pub fn increase(&mut self, key: Var, act: &[f64]) {
         debug_assert!(self.contains(key));
         self.percolate_down(self.indices[key.0 as usize], act);
     }
 
-    pub fn update(&mut self, key :Var, act :&[f64]) {
-        if !self.contains(key) { self.insert(key, act); }
-        else { 
+    pub fn update(&mut self, key: Var, act: &[f64]) {
+        if !self.contains(key) {
+            self.insert(key, act);
+        } else {
             self.percolate_up(self.indices[key.0 as usize], act);
             self.percolate_down(self.indices[key.0 as usize], act);
         }
     }
 
-    pub fn insert(&mut self, key :Var, act :&[f64]) {
+    pub fn insert(&mut self, key: Var, act: &[f64]) {
         self.indices.resize(key.0 as usize, -1);
         debug_assert!(!self.contains(key));
 
@@ -173,13 +188,13 @@ impl OrderHeap {
         self.percolate_up(self.indices[key.0 as usize], act);
     }
 
-    pub fn remove(&mut self, key :Var, act :&[f64]) {
+    pub fn remove(&mut self, key: Var, act: &[f64]) {
         debug_assert!(self.contains(key));
         let k_pos = self.indices[key.0 as usize];
         self.indices[key.0 as usize] = -1;
 
         if k_pos < self.heap.len() as i32 - 1 {
-            self.heap[k_pos as usize] = self.heap[self.heap.len()-1];
+            self.heap[k_pos as usize] = self.heap[self.heap.len() - 1];
             self.indices[self.heap[k_pos as usize].0 as usize] = k_pos;
             self.heap.pop();
             self.percolate_down(k_pos, act);
@@ -188,9 +203,9 @@ impl OrderHeap {
         }
     }
 
-    pub fn remove_min(&mut self, act :&[f64]) -> Var {
+    pub fn remove_min(&mut self, act: &[f64]) -> Var {
         let var = self.heap[0];
-        self.heap[0] = self.heap[self.heap.len()-1];
+        self.heap[0] = self.heap[self.heap.len() - 1];
         self.indices[self.heap[0].0 as usize] = 0;
         self.indices[var.0 as usize] = -1;
         self.heap.pop();
@@ -203,54 +218,70 @@ impl OrderHeap {
 
 struct ClauseDatabase {
     clause_data: Vec<u32>,
+    wasted: u32,
 }
 
 impl ClauseDatabase {
-    fn add_clause(&mut self, lits :&[Lit], extra_data :bool) -> ClauseHeaderOffset {
+    fn free(&mut self, cref: ClauseHeaderOffset) {
+        let header = self.get_header(cref);
+        self.wasted += 1 + header.get_size() + header.get_extra_data();
+    }
+
+    fn add_clause(&mut self, lits: &[Lit], extra_data: bool) -> ClauseHeaderOffset {
         let header_size = std::mem::size_of::<ClauseHeader>();
         let data_size = lits.len();
-        
+
         let mut header = ClauseHeader(0);
         header.set_size(data_size as u32);
         header.set_extra_data(extra_data as u32);
         let header = header;
 
         let cref = self.clause_data.len() as i32;
-        self.clause_data.push(unsafe {
-            std::mem::transmute::<ClauseHeader,u32>(header)
-        });
+        self.clause_data
+            .push(unsafe { std::mem::transmute::<ClauseHeader, u32>(header) });
         self.clause_data.extend(unsafe {
             std::slice::from_raw_parts(lits.as_ptr() as *const Lit as *const u32, lits.len())
         });
 
         if extra_data {
-            self.clause_data.push(unsafe {
-                std::mem::transmute::<f32,u32>(0.0)
-            });
+            self.clause_data
+                .push(unsafe { std::mem::transmute::<f32, u32>(0.0) });
         }
 
         cref
     }
 
-    fn get_activity<'a>(&'a mut self, header_addr :ClauseHeaderOffset) -> &'a mut f32 {
+    fn get_activity<'a>(&'a mut self, header_addr: ClauseHeaderOffset) -> &'a mut f32 {
         let header = self.get_header(header_addr);
         unsafe {
-            let ptr = (self.clause_data.get_mut(header_addr as usize).unwrap() as *mut u32 as *mut f32)
-                .offset((1 + header.get_size()) as isize  *std::mem::size_of::<u32>() as isize);
+            let ptr = (self.clause_data.get_mut(header_addr as usize).unwrap() as *mut u32
+                as *mut f32)
+                .offset((1 + header.get_size()) as isize * std::mem::size_of::<u32>() as isize);
             &mut *ptr
         }
     }
 
-    fn get_header(&self, header_addr :ClauseHeaderOffset) -> ClauseHeader {
+    fn get_header_mut<'a>(&'a mut self, header_addr: ClauseHeaderOffset) -> &'a mut ClauseHeader {
         assert!(header_addr >= 0);
-        assert_eq!(std::mem::size_of::<ClauseHeader>(), std::mem::size_of::<u32>());
-        let val = self.clause_data[header_addr as usize];
-        unsafe {
-            std::mem::transmute::<u32,ClauseHeader>(val)
-        }
+        assert_eq!(
+            std::mem::size_of::<ClauseHeader>(),
+            std::mem::size_of::<u32>()
+        );
+        let val = &mut self.clause_data[header_addr as usize];
+        unsafe { std::mem::transmute::<&mut u32, &mut ClauseHeader>(val) }
     }
 
-    fn get_lits<'a>(&'a self, header_addr :ClauseHeaderOffset, size :usize) -> &'a [Lit] {
+    fn get_header(&self, header_addr: ClauseHeaderOffset) -> ClauseHeader {
+        assert!(header_addr >= 0);
+        assert_eq!(
+            std::mem::size_of::<ClauseHeader>(),
+            std::mem::size_of::<u32>()
+        );
+        let val = self.clause_data[header_addr as usize];
+        unsafe { std::mem::transmute::<u32, ClauseHeader>(val) }
+    }
+
+    fn get_lits<'a>(&'a self, header_addr: ClauseHeaderOffset, size: usize) -> &'a [Lit] {
         unsafe {
             let ptr = (&self.clause_data[header_addr as usize] as *const u32 as *const Lit)
                 .offset(std::mem::size_of::<ClauseHeader>() as isize);
@@ -269,7 +300,7 @@ pub struct Solver {
     pub stats: SolverStatistics,
 
     // solver state
-    clause_database :ClauseDatabase,
+    clause_database: ClauseDatabase,
     clauses: Vec<ClauseHeaderOffset>,
     learnts: Vec<ClauseHeaderOffset>,
 
@@ -388,6 +419,7 @@ impl Solver {
 
             clause_database: ClauseDatabase {
                 clause_data: Vec::new(),
+                wasted: 0,
             },
             clauses: Vec::new(),
             learnts: Vec::new(),
@@ -521,23 +553,25 @@ impl Solver {
         self.var_inc *= (1.0 / self.params.var_decay);
     }
 
-    fn var_bump_activity_default(&mut self, var :Var) {
-        self.var_bump_activity(var, self.var_inc);
-    }
-
-    fn var_bump_activity(&mut self, var :Var, inc :f64) {
-        self.activity[var.0 as usize] += inc;
-        if self.activity[var.0 as usize] > 1e100 {
+    fn var_bump_activity(
+        activity: &mut [f64],
+        order_heap: &mut OrderHeap,
+        var_inc: &mut f64,
+        var: Var,
+        inc: f64,
+    ) {
+        activity[var.0 as usize] += inc;
+        if activity[var.0 as usize] > 1e100 {
             // rescale
-            for act in &mut self.activity {
+            for act in activity.iter_mut() {
                 *act *= 1e-100;
             }
-            self.var_inc *= 1e-100;
+            *var_inc *= 1e-100;
         }
 
         // update heap
-        if self.order_heap.contains(var) {
-            self.order_heap.decrease(var, &self.activity);
+        if order_heap.contains(var) {
+            order_heap.decrease(var, &*activity);
         }
     }
 
@@ -545,7 +579,7 @@ impl Solver {
         self.cla_inc *= (1.0 / self.params.clause_decay);
     }
 
-    fn clause_bump_activity(&mut self, cref :ClauseHeaderOffset) {
+    fn clause_bump_activity(&mut self, cref: ClauseHeaderOffset) {
         let activity = self.clause_database.get_activity(cref);
         *activity += self.cla_inc as f32;
         if *activity > 1e20 {
@@ -557,28 +591,30 @@ impl Solver {
         }
     }
 
-    fn release_var(&mut self, l :Lit) {
+    fn release_var(&mut self, l: Lit) {
         if self.lit_value(l) == LBool::Undef {
             self.add_clause(std::iter::once(l));
             self.released_vars.push(l.var());
         }
     }
 
-    fn var_value(&self, var :Var) -> LBool {
+    fn var_value(&self, var: Var) -> LBool {
         self.assigns[var.0 as usize]
     }
 
-    fn lit_value(&self, lit :Lit) -> LBool {
+    fn lit_value(&self, lit: Lit) -> LBool {
         Self::assigns_lit_value(&self.assigns, lit)
     }
 
-    fn assigns_lit_value(assigns :&Vec<LBool>, lit :Lit) -> LBool {
+    fn assigns_lit_value(assigns: &Vec<LBool>, lit: Lit) -> LBool {
         LBool::xor(&assigns[lit.var().0 as usize], lit.sign())
     }
 
-    fn add_clause(&mut self, ps :impl Iterator<Item = Lit>) -> bool {
+    fn add_clause(&mut self, ps: impl Iterator<Item = Lit>) -> bool {
         assert!(self.trail_lim.len() == 0);
-        if !self.ok { return false; }
+        if !self.ok {
+            return false;
+        }
 
         self.add_tmp.clear();
         self.add_tmp.extend(ps);
@@ -592,18 +628,20 @@ impl Solver {
                 if Self::assigns_lit_value(assigns, *l) == LBool::False || *l == prev.inverse() {
                     already_sat = true;
                 }
-                !(   /* dedup */ (prev, prev=*l).0 == *l
+                !(/* dedup */(prev, prev=*l).0 == *l
                   || /* known */ Self::assigns_lit_value(assigns, *l) == LBool::True)
             });
 
-            if already_sat { return true; }
+            if already_sat {
+                return true;
+            }
         }
 
-        if self.add_tmp.len() == 0  {
+        if self.add_tmp.len() == 0 {
             self.ok = false;
             return false;
         } else if self.add_tmp.len() == 1 {
-            self.unchecked_enqueue(self.add_tmp[0]);
+            self.unchecked_enqueue(self.add_tmp[0], CLAUSE_NONE);
             self.ok = self.propagate() == CLAUSE_NONE;
             return self.ok;
         } else {
@@ -615,14 +653,291 @@ impl Solver {
         true
     }
 
-    fn attach_clause(&mut self, cref :ClauseHeaderOffset) {
+    fn attach_clause(&mut self, cref: ClauseHeaderOffset) {
         let header = self.clause_database.get_header(cref);
-        assert!(header.get_size() > 1);
+        let sz = header.get_size();
+        assert!(sz > 1);
+
+        let lits = self.clause_database.get_lits(cref, sz as usize);
+        self.watch_occs[lits[0].inverse().0 as usize].push(Watcher {
+            cref,
+            blocker: lits[1],
+        });
+        self.watch_occs[lits[1].inverse().0 as usize].push(Watcher {
+            cref,
+            blocker: lits[0],
+        });
+
+        if header.get_learnt() == 1 {
+            self.stats.num_learnts += 1;
+            self.stats.learnts_literals += sz as usize;
+        } else {
+            self.stats.num_clauses += 1;
+            self.stats.clauses_literals += sz as usize;
+        }
     }
 
+    fn detach_clause(&mut self, cref: ClauseHeaderOffset, strict: bool) {
+        let header = self.clause_database.get_header(cref);
+        let sz = header.get_size();
+        assert!(sz > 1);
+        let lits = self.clause_database.get_lits(cref, sz as usize);
 
-    fn unchecked_enqueue(&mut self, lit :Lit) {
+        if strict {
+            self.watch_occs[lits[0].inverse().0 as usize].retain(|w| {
+                w != &Watcher {
+                    cref,
+                    blocker: lits[1],
+                }
+            });
+            self.watch_occs[lits[1].inverse().0 as usize].retain(|w| {
+                w != &Watcher {
+                    cref,
+                    blocker: lits[0],
+                }
+            });
+        } else {
+            Self::smudge_watcher(
+                &mut self.watch_dirty,
+                &mut self.watch_dirties,
+                lits[0].inverse(),
+            );
+            Self::smudge_watcher(
+                &mut self.watch_dirty,
+                &mut self.watch_dirties,
+                lits[1].inverse(),
+            );
+        }
+
+        if header.get_learnt() == 1 {
+            self.stats.num_learnts -= 1;
+            self.stats.learnts_literals -= sz as usize;
+        } else {
+            self.stats.num_clauses -= 1;
+            self.stats.clauses_literals -= sz as usize;
+        }
+    }
+
+    fn smudge_watcher(dirty: &mut Vec<i8>, dirties: &mut Vec<Lit>, lit: Lit) {
+        let flag = &mut dirty[lit.0 as usize];
+        if *flag == 0 {
+            *flag = 1;
+            dirties.push(lit);
+        }
+    }
+
+    fn remove_clause(&mut self, cref: ClauseHeaderOffset) {
+        self.detach_clause(cref, false);
+        let header = self.clause_database.get_header(cref);
+        let lits = self
+            .clause_database
+            .get_lits(cref, header.get_size() as usize);
+        let var = lits[0].var();
+
+        if self.is_clause_locked(cref, lits) {
+            let vardata = &mut self.vardata[lits[0].var().0 as usize];
+            vardata.reason = CLAUSE_NONE;
+        }
+
+        self.clause_database.get_header_mut(cref).set_mark(1 as u32);
+        self.clause_database.free(cref);
+    }
+
+    fn is_clause_locked(&self, cref: ClauseHeaderOffset, lits: &[Lit]) -> bool {
+        let vardata = &self.vardata[lits[0].var().0 as usize];
+        self.lit_value(lits[0]) == LBool::True
+            && vardata.reason != CLAUSE_NONE
+            && vardata.reason == cref
+    }
+
+    fn satisfied(&self, clause: &[Lit]) -> bool {
+        clause.iter().any(|l| self.lit_value(*l) == LBool::True)
+    }
+
+    fn cancel_until(&mut self, level: i32) {
+        if self.trail_lim.len() > level as usize {
+            let mut c = (self.trail.len() - 1) as i32;
+            while c >= self.trail_lim[level as usize] {
+                let x = self.trail[c as usize];
+                self.assigns[x.var().0 as usize] = LBool::Undef;
+                if self.params.phase_saving > 1
+                    || (self.params.phase_saving == 1 && Some(&c) > self.trail_lim.last())
+                {
+                    self.polarity[x.var().0 as usize] = x.sign() as i8;
+                }
+                self.insert_var_order(x.var());
+                c -= 1;
+            }
+
+            self.qhead = self.trail_lim[level as usize] as usize;
+            self.trail
+                .truncate(self.trail.len() - self.trail_lim[level as usize] as usize);
+            self.trail_lim
+                .truncate(self.trail_lim.len() - level as usize);
+        }
+    }
+
+    fn pick_branch_lit(&mut self) -> Lit {
+        let mut next = VAR_UNDEF;
+
+        // random
+        if drand(&mut self.params.random_seed) < self.params.random_var_freq
+            && !self.order_heap.is_empty()
+        {
+            next = self.order_heap.heap[irand(
+                &mut self.params.random_seed,
+                self.order_heap.heap.len() as i32,
+            ) as usize];
+            if self.var_value(next) == LBool::Undef && self.decision[next.0 as usize] == 1 {
+                self.stats.rnd_decisions += 1;
+            }
+        }
+
+        // activity-based
+        while next == VAR_UNDEF
+            || self.var_value(next) != LBool::Undef
+            || self.decision[next.0 as usize] != 1
+        {
+            if self.order_heap.is_empty() {
+                next = VAR_UNDEF;
+                break;
+            } else {
+                next = self.order_heap.remove_min(&self.activity);
+            }
+        }
+
+        // polarity
+        if next == VAR_UNDEF {
+            LIT_UNDEF
+        } else if self.user_pol[next.0 as usize] != LBool::Undef {
+            Lit::new(next, self.user_pol[next.0 as usize] == LBool::True)
+        } else if self.params.rnd_pol {
+            Lit::new(next, drand(&mut self.params.random_seed) < 0.5)
+        } else {
+            Lit::new(next, self.polarity[next.0 as usize] == 1)
+        }
+    }
+
+    /// Analyze conflict and produce a reason lcause.
+    ///
+    /// Pre-conditions:
+    /// * out_learnt is assumed to be empty.
+    /// * Current decision level must be greater than root level.
+    ///
+    /// Post-conditions:
+    /// * out_learnt[0] is the asserting literal at the returned backtracking level.
+    /// * if out_learnt.len() > 1 then out_learnt[1] has the greatest decision
+    ///   level of the rest of the literals.
+    fn analyse(
+        &mut self,
+        mut conflict_clause: ClauseHeaderOffset,
+        out_learnt: &mut Vec<Lit>,
+    ) -> i32 {
+        let mut path_c = 0;
+        let mut p = LIT_UNDEF;
+        out_learnt.push(LIT_UNDEF);
+        let mut index = self.trail.len() - 1;
+
+        loop {
+            assert!(conflict_clause != CLAUSE_NONE);
+            let header = self.clause_database.get_header(conflict_clause);
+            if header.get_learnt() == 1 {
+                assert!(header.get_extra_data() == 1);
+                self.clause_bump_activity(conflict_clause);
+            }
+
+            let lits = self
+                .clause_database
+                .get_lits(conflict_clause, header.get_size() as usize);
+            for q in lits.iter().skip(if p == LIT_UNDEF { 0 } else { 1 }) {
+                if self.seen[q.var().idx()] == 0 && self.vardata[q.var().idx()].level > 0 {
+                    let inc = self.var_inc;
+                    Self::var_bump_activity(
+                        &mut self.activity,
+                        &mut self.order_heap,
+                        &mut self.var_inc,
+                        q.var(),
+                        inc,
+                    );
+                    self.seen[q.var().idx()] = 1;
+                    if self.vardata[q.var().idx()].level >= self.trail_lim.len() as i32 {
+                        path_c += 1;
+                    } else {
+                        out_learnt.push(*q);
+                    }
+                }
+            }
+
+            // select next clause to look at:
+            while self.seen[self.trail[index].var().idx()] == 0 {
+                index -= 1;
+            }
+            p = self.trail[index + 1];
+            conflict_clause = self.vardata[p.var().idx()].reason;
+            self.seen[p.var().idx()] = 0;
+            path_c -= 1;
+
+            if path_c == 0 {
+                break;
+            }
+        }
+
+        out_learnt[0] = p.inverse();
+
+        // simplify conflict clause
+
+        self.analyze_toclear.clear();
+        self.analyze_toclear.resize(out_learnt.len(), LIT_UNDEF);
+        self.analyze_toclear.copy_from_slice(out_learnt.as_slice());
+
+        self.stats.max_literals += out_learnt.len();
+        if self.params.ccmin_mode == 2 {
+            let first = out_learnt[0];
+            out_learnt.retain(|l| {
+                *l == first
+                    || self.vardata[l.var().idx()].reason == CLAUSE_NONE
+                    || !self.lit_redundant(*l)
+            });
+        } else if self.params.ccmin_mode == 1 {
+            // TODO is this mode used?
+            unimplemented!()
+        }
+        self.stats.tot_literals += out_learnt.len();
+
+        // find correct backtrack level
+        let out_level = if out_learnt.len() == 1 {
+            0
+        } else {
+            let max_idx = out_learnt
+                .iter()
+                .enumerate()
+                .skip(1)
+                .max_by_key(|(_, l)| self.vardata[l.var().idx()].level)
+                .unwrap()
+                .0;
+            out_learnt.swap(1, max_idx);
+            self.vardata[out_learnt[1].var().idx()].level
+        };
+
+        for l in self.analyze_toclear.iter() {
+            self.seen[l.var().idx()] = 0;
+        }
+
+        out_level
+    }
+
+    fn lit_redundant(&mut self, lit: Lit) -> bool {
         unimplemented!()
+    }
+
+    fn unchecked_enqueue(&mut self, lit: Lit, reason: ClauseHeaderOffset) {
+        assert!(self.lit_value(lit) == LBool::Undef);
+        self.assigns[lit.var().0 as usize] = LBool::from_bool(lit.sign());
+        self.vardata[lit.var().0 as usize] = VariableData {
+            reason,
+            level: self.trail_lim.len() as i32,
+        };
+        self.trail.push(lit);
     }
 
     fn propagate(&mut self) -> ClauseHeaderOffset {
