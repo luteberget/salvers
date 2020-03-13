@@ -1129,9 +1129,18 @@ impl Solver {
                     self.unchecked_enqueue(first, watch_i.cref);
                 }
             }
-        }
 
-        unimplemented!()
+            self.watch_occs[p.0 as usize].truncate(i-j);
+        }
+        self.stats.propagations += num_props;
+        self.simp_db_props -= num_props;
+
+        conflict_clause
+    }
+
+    fn reduce_db(&mut self) {
+        let extra_lim = self.cla_inc / self.learnts.len() as f64;
+        //self.learnts.sort
     }
 
     fn clean_watch(&mut self, lit: Lit) {
