@@ -102,6 +102,25 @@ struct OrderHeap {
 }
 
 impl OrderHeap {
+    pub fn build(&mut self, ns: &[i32], act: &[f64]) {
+        for i in 0..self.heap.len() {
+            self.indices[self.heap[i].0 as usize] = -1;
+        }
+        self.heap.clear();
+
+        for i in 0..ns.len() {
+            assert!(self.indices.len() > ns[i] as usize);
+            self.indices[ns[i] as usize] = i as i32;
+            self.heap.push(Var(ns[i]));
+        }
+
+        let mut i = (self.heap.len() / 2 - 1) as i32;
+        while i >= 0 {
+            self.percolate_down(i as i32, act);
+            i -= 1;
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.heap.is_empty()
     }
@@ -222,6 +241,29 @@ struct ClauseDatabase {
 }
 
 impl ClauseDatabase {
+    fn relocate_clause(
+        &mut self,
+        cref: ClauseHeaderOffset,
+        new_data: &mut Vec<u32>,
+    ) -> ClauseHeaderOffset {
+        let header = self.get_header(cref);
+        if header.get_reloced() == 1 {
+            return *self.get_relocated_address(cref);
+        }
+
+        // copy
+        let size_in_u32 = 1 + header.get_size() as usize + header.get_extra_data() as usize;
+        let new_addr = new_data.len() as ClauseHeaderOffset;
+        new_data.extend(&self.clause_data[cref as usize..(cref as usize + size_in_u32)]);
+
+        // mark the old clause
+        self.get_header_mut(cref).set_reloced(1);
+        *self.get_relocated_address(cref) = new_addr;
+
+        // return new address
+        new_addr
+    }
+
     fn free(&mut self, cref: ClauseHeaderOffset) {
         let header = self.get_header(cref);
         self.wasted += 1 + header.get_size() + header.get_extra_data();
@@ -251,7 +293,16 @@ impl ClauseDatabase {
         cref
     }
 
-    fn get_activity<'a>(&'a mut self, header_addr: ClauseHeaderOffset) -> &'a mut f32 {
+    fn get_activity<'a>(&'a self, header_addr: ClauseHeaderOffset) -> &'a f32 {
+        let header = self.get_header(header_addr);
+        unsafe {
+            let ptr = (self.clause_data[header_addr as usize] as *const u32 as *const f32)
+                .offset((1 + header.get_size()) as isize * std::mem::size_of::<u32>() as isize);
+            &*ptr
+        }
+    }
+
+    fn get_activity_mut<'a>(&'a mut self, header_addr: ClauseHeaderOffset) -> &'a mut f32 {
         let header = self.get_header(header_addr);
         unsafe {
             let ptr = (self.clause_data.get_mut(header_addr as usize).unwrap() as *mut u32
@@ -259,6 +310,27 @@ impl ClauseDatabase {
                 .offset((1 + header.get_size()) as isize * std::mem::size_of::<u32>() as isize);
             &mut *ptr
         }
+    }
+
+    fn get_clause_mut<'a>(
+        &'a mut self,
+        header_addr: ClauseHeaderOffset,
+    ) -> (&'a mut ClauseHeader, &'a mut [Lit]) {
+        assert!(header_addr >= 0);
+        assert_eq!(
+            std::mem::size_of::<ClauseHeader>(),
+            std::mem::size_of::<u32>()
+        );
+        let val = &mut self.clause_data[header_addr as usize];
+        let header = unsafe { std::mem::transmute::<&mut u32, &mut ClauseHeader>(val) };
+        let size = header.get_size() as usize;
+        let lits = unsafe {
+            let ptr = (self.clause_data.get_mut(header_addr as usize).unwrap() as *mut u32
+                as *mut Lit)
+                .offset(std::mem::size_of::<ClauseHeader>() as isize);
+            std::slice::from_raw_parts_mut(ptr, size)
+        };
+        (header, lits)
     }
 
     fn get_header_mut<'a>(&'a mut self, header_addr: ClauseHeaderOffset) -> &'a mut ClauseHeader {
@@ -289,9 +361,26 @@ impl ClauseDatabase {
         }
     }
 
-    fn get_lits_mut<'a>(&'a mut self, header_addr: ClauseHeaderOffset, size: usize) -> &'a mut [Lit] {
+    fn get_relocated_address<'a>(
+        &'a mut self,
+        header_addr: ClauseHeaderOffset,
+    ) -> &mut ClauseHeaderOffset {
         unsafe {
-            let ptr = (self.clause_data.get_mut(header_addr as usize).unwrap() as *mut u32 as *mut Lit)
+            let ptr = (self.clause_data.get_mut(header_addr as usize).unwrap() as *mut u32
+                as *mut ClauseHeaderOffset)
+                .offset(std::mem::size_of::<ClauseHeader>() as isize);
+            &mut *ptr
+        }
+    }
+
+    fn get_lits_mut<'a>(
+        &'a mut self,
+        header_addr: ClauseHeaderOffset,
+        size: usize,
+    ) -> &'a mut [Lit] {
+        unsafe {
+            let ptr = (self.clause_data.get_mut(header_addr as usize).unwrap() as *mut u32
+                as *mut Lit)
                 .offset(std::mem::size_of::<ClauseHeader>() as isize);
             std::slice::from_raw_parts_mut(ptr, size)
         }
@@ -588,12 +677,12 @@ impl Solver {
     }
 
     fn clause_bump_activity(&mut self, cref: ClauseHeaderOffset) {
-        let activity = self.clause_database.get_activity(cref);
+        let activity = self.clause_database.get_activity_mut(cref);
         *activity += self.cla_inc as f32;
         if *activity > 1e20 {
             // rescale
             for p in self.learnts.iter() {
-                *self.clause_database.get_activity(*p) *= 1e-20;
+                *self.clause_database.get_activity_mut(*p) *= 1e-20;
             }
             self.cla_inc *= 1e-20;
         }
@@ -619,6 +708,8 @@ impl Solver {
     }
 
     fn add_clause(&mut self, ps: impl Iterator<Item = Lit>) -> bool {
+        // Add "original" clause, cannot be direclty used
+        // during search because of simplification.
         assert!(self.trail_lim.len() == 0);
         if !self.ok {
             return false;
@@ -762,6 +853,12 @@ impl Solver {
         clause.iter().any(|l| self.lit_value(*l) == LBool::True)
     }
 
+    fn assigns_satisfied(assigns: &Vec<LBool>, clause: &[Lit]) -> bool {
+        clause
+            .iter()
+            .any(|l| Self::assigns_lit_value(assigns, *l) == LBool::True)
+    }
+
     fn cancel_until(&mut self, level: i32) {
         if self.trail_lim.len() > level as usize {
             let mut c = (self.trail.len() - 1) as i32;
@@ -836,7 +933,7 @@ impl Solver {
     /// * out_learnt[0] is the asserting literal at the returned backtracking level.
     /// * if out_learnt.len() > 1 then out_learnt[1] has the greatest decision
     ///   level of the rest of the literals.
-    fn analyse(
+    fn analyze(
         &mut self,
         mut conflict_clause: ClauseHeaderOffset,
         out_learnt: &mut Vec<Lit>,
@@ -1077,25 +1174,32 @@ impl Solver {
                 if Self::assigns_lit_value(assigns, watch_i.blocker) == LBool::True {
                     watches[j] = watch_i;
                     j += 1;
-                    i += 1; 
+                    i += 1;
                     continue;
                 }
 
                 // Make sure the false literal is clause_lits[1].
                 let header = self.clause_database.get_header(watch_i.cref);
-                let lits = self.clause_database.get_lits_mut(watch_i.cref, header.get_size() as usize);
+                let lits = self
+                    .clause_database
+                    .get_lits_mut(watch_i.cref, header.get_size() as usize);
                 let false_lit = p.inverse();
                 if lits[0] == false_lit {
-                    lits.swap(0,1);
+                    lits.swap(0, 1);
                 }
                 assert!(lits[1] == false_lit);
 
                 i += 1;
 
                 let first = lits[0];
-                let w = Watcher { cref: watch_i.cref, blocker: first };
+                let w = Watcher {
+                    cref: watch_i.cref,
+                    blocker: first,
+                };
                 // If 0th watch is true, then the clause is already satisfied
-                if first != watch_i.blocker && Self::assigns_lit_value(assigns, first) == LBool::True {
+                if first != watch_i.blocker
+                    && Self::assigns_lit_value(assigns, first) == LBool::True
+                {
                     watches[j] = w;
                     j += 1;
                     continue;
@@ -1123,14 +1227,14 @@ impl Solver {
                     while i < self.watch_occs[p.0 as usize].len() {
                         self.watch_occs[p.0 as usize][j] = watch_i;
                         j += 1;
-                        i += 1; 
+                        i += 1;
                     }
                 } else {
                     self.unchecked_enqueue(first, watch_i.cref);
                 }
             }
 
-            self.watch_occs[p.0 as usize].truncate(i-j);
+            self.watch_occs[p.0 as usize].truncate(i - j);
         }
         self.stats.propagations += num_props;
         self.simp_db_props -= num_props;
@@ -1140,7 +1244,150 @@ impl Solver {
 
     fn reduce_db(&mut self) {
         let extra_lim = self.cla_inc / self.learnts.len() as f64;
-        //self.learnts.sort
+        {
+            use std::cmp::Ordering;
+            let db = &self.clause_database;
+            self.learnts.sort_by(|x, y| {
+                if db.get_header(*x).get_size() > 2
+                    && (db.get_header(*y).get_size() == 2
+                        || db.get_activity(*x) < db.get_activity(*y))
+                {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            });
+        }
+
+        let (mut i, mut j) = (0, 0);
+        while i < self.learnts.len() {
+            let cref = self.learnts[i];
+            let header = self.clause_database.get_header(cref);
+            let lits = self
+                .clause_database
+                .get_lits(cref, header.get_size() as usize);
+            if header.get_size() > 2
+                && !self.is_clause_locked(cref, lits)
+                && (i < self.learnts.len() / 2
+                    || (*self.clause_database.get_activity(cref) as f64) < extra_lim)
+            {
+                self.remove_clause(cref);
+            } else {
+                // keep in self.learnts
+                self.learnts[j] = cref;
+                j += 1;
+            }
+            i += 1;
+        }
+        self.learnts.truncate(i - j);
+        self.check_garbage();
+    }
+
+    fn check_garbage(&mut self) {
+        if (self.clause_database.wasted as f64)
+            > (self.clause_database.clause_data.len() as f64) * self.params.garbage_frac
+        {
+            self.garbage_collect();
+        }
+    }
+
+    fn garbage_collect(&mut self) {
+        let mut new_data = Vec::with_capacity(
+            self.clause_database.clause_data.len() - self.clause_database.wasted as usize,
+        );
+        self.reloc_all_clauses(&mut new_data);
+        std::mem::swap(&mut self.clause_database.clause_data, &mut new_data);
+        self.clause_database.wasted = 0;
+    }
+
+    fn reloc_all_clauses(&mut self, new_data: &mut Vec<u32>) {
+        // TODO extra_clause_field
+
+        self.clean_all_watches();
+
+        // relocate watches
+        for ws in self.watch_occs.iter() {
+            for w in ws.iter() {
+                self.clause_database.relocate_clause(w.cref, new_data);
+            }
+        }
+
+        // relocate reasons
+        for i in 0..self.trail.len() {
+            let var = self.trail[i].var();
+            let reason = self.vardata[var.idx()].reason;
+            if reason != CLAUSE_NONE {
+                let header = self.clause_database.get_header(reason);
+                let lits = self
+                    .clause_database
+                    .get_lits(reason, header.get_size() as usize);
+                if header.get_reloced() == 1 || self.is_clause_locked(reason, lits) {
+                    assert!(header.get_mark() != 1); // is not removed
+                    self.clause_database.relocate_clause(reason, new_data);
+                }
+            }
+        }
+
+        let db = &mut self.clause_database;
+
+        // relocate learnt clauses
+        self.learnts.retain(|c| {
+            if db.get_header(*c).get_mark() != 1 {
+                db.relocate_clause(*c, new_data);
+                true
+            } else {
+                false
+            }
+        });
+
+        // relocate original clauses
+        self.clauses.retain(|c| {
+            if db.get_header(*c).get_mark() != 1 {
+                db.relocate_clause(*c, new_data);
+                true
+            } else {
+                false
+            }
+        });
+    }
+
+    fn remove_satisfied(&mut self, clauses: &mut Vec<ClauseHeaderOffset>) {
+        let (mut i, mut j) = (0, 0);
+        while i < clauses.len() {
+            let cref = clauses[i];
+            let (header, lits) = self.clause_database.get_clause_mut(cref);
+            if Self::assigns_satisfied(&self.assigns, lits) {
+                self.remove_clause(cref);
+            } else {
+                assert!(
+                    Self::assigns_lit_value(&self.assigns, lits[0]) == LBool::Undef
+                        || Self::assigns_lit_value(&self.assigns, lits[0]) == LBool::Undef
+                );
+                let mut k = 2;
+                while k < lits.len() {
+                    if Self::assigns_lit_value(&self.assigns, lits[k]) == LBool::False {
+                        lits[k] = lits[lits.len() - 1];
+                        k -= 1;
+                    }
+                    k += 1;
+                }
+                header.set_size(k as u32);
+
+                // keep
+                clauses[j] = clauses[i];
+                j += 1;
+            }
+            i += 1;
+        }
+        clauses.truncate(i - j);
+    }
+
+    fn clean_all_watches(&mut self) {
+        // TODO should not be necessary to reallocate here
+        let dirties = std::mem::replace(&mut self.watch_dirties, Vec::new());
+        for l in dirties {
+            self.clean_watch(l);
+        }
     }
 
     fn clean_watch(&mut self, lit: Lit) {
@@ -1148,10 +1395,231 @@ impl Solver {
             return;
         }
         let db = &self.clause_database;
-        self.watch_occs[lit.0 as usize]
-            .retain(|w| db.get_header(w.cref).get_mark() != 1);
+        self.watch_occs[lit.0 as usize].retain(|w| db.get_header(w.cref).get_mark() != 1);
         self.watch_dirty[lit.0 as usize] = 0;
     }
+
+    fn simplify(&mut self) -> bool {
+        assert!(self.trail_lim.len() == 0);
+        if !self.ok || self.propagate() != CLAUSE_NONE {
+            self.ok = false;
+            return false;
+        }
+
+        if self.trail.len() == self.simp_db_assigns as usize || self.simp_db_props > 0 {
+            return true;
+        }
+
+        // TODO do not move/allocate here.
+        let mut learnts = std::mem::replace(&mut self.learnts, Vec::new());
+        self.remove_satisfied(&mut learnts);
+        self.learnts = learnts;
+        if self.remove_satisfied {
+            let mut clauses = std::mem::replace(&mut self.clauses, Vec::new());
+            self.remove_satisfied(&mut clauses);
+            self.clauses = clauses;
+
+            // remove released variables from trail
+            for v in self.released_vars.iter() {
+                assert!(self.seen[v.idx()] == 0);
+                self.seen[v.idx()] = 1;
+            }
+
+            let seen = &mut self.seen;
+            self.trail.retain(|l| seen[l.var().idx()] == 0);
+            self.qhead = self.trail.len();
+            for v in self.released_vars.iter() {
+                self.seen[v.idx()] = 0;
+            }
+            self.free_vars.extend(self.released_vars.drain(..));
+        }
+
+        self.check_garbage();
+        self.rebuild_order_heap();
+
+        self.simp_db_assigns = self.trail.len() as i32;
+        self.simp_db_props = self.stats.clauses_literals + self.stats.learnts_literals;
+
+        true
+    }
+
+    fn rebuild_order_heap(&mut self) {
+        let mut vs = Vec::new();
+        for v in (0..self.decision.len()) {
+            if self.decision[v] == 1 && self.var_value(Var(v as i32)) == LBool::Undef {
+                vs.push(v as i32);
+            }
+        }
+        self.order_heap.build(&vs, &self.activity);
+    }
+
+    fn search(&mut self, nof_conflicts: i32) -> LBool {
+        assert!(self.ok);
+        let mut backtrack_level: i32;
+        let mut conflict_c = 0;
+        let mut learnt_clause = Vec::new();
+
+        loop {
+            let conflict_clause = self.propagate();
+            if conflict_clause != CLAUSE_NONE {
+                // found conflict
+                self.stats.conflicts += 1;
+                conflict_c += 1;
+                if self.trail_lim.len() == 0 {
+                    return LBool::False;
+                }
+
+                learnt_clause.clear();
+                backtrack_level = self.analyze(conflict_clause, &mut learnt_clause);
+                self.cancel_until(backtrack_level);
+
+                if learnt_clause.len() == 1 {
+                    self.unchecked_enqueue(learnt_clause[0], CLAUSE_NONE);
+                } else {
+                    let new_cref = self.clause_database.add_clause(&learnt_clause, true);
+                    self.learnts.push(new_cref);
+                    self.attach_clause(new_cref);
+                    self.clause_bump_activity(new_cref);
+                    self.unchecked_enqueue(learnt_clause[0], new_cref);
+                }
+
+                self.var_decay_activity();
+                self.clause_decay_activity();
+
+                self.learntsize_adjust_cnt -= 1;
+                if self.learntsize_adjust_cnt == 0 {
+                    self.learntsize_adjust_confl *= self.params.learntsize_adjust_inc;
+                    self.learntsize_adjust_cnt = self.learntsize_adjust_confl as i32;
+                    self.max_learnts *= self.params.learntsize_inc;
+                }
+            } else {
+                // no conflict found
+
+                if nof_conflicts >= 0 && conflict_c >= nof_conflicts || !self.within_budget() {
+                    // budget cancel
+                    self.cancel_until(0);
+                    return LBool::Undef;
+                }
+
+                // simplify problem clauses
+                if self.trail_lim.len() == 0 && !self.simplify() {
+                    return LBool::False;
+                }
+
+                // reduce the set of learnt clauses
+                if (self.learnts.len() - self.trail.len()) as f64 >= self.max_learnts {
+                    self.reduce_db();
+                }
+
+                let mut next = LIT_UNDEF;
+                while self.trail_lim.len() < self.assumptions.len() {
+                    // perform user provided assumption
+                    let p = self.assumptions[self.trail_lim.len()];
+                    // already satisfied?
+                    match self.lit_value(p) {
+                        // dummy decision level
+                        LBool::True => { self.trail_lim.push(self.trail.len() as i32); }
+                        LBool::False => {
+                            self.analyze_final(p.inverse());
+                            return LBool::False;
+                        },
+                        LBool::Undef => {
+                            next = p;
+                            break;
+                        }
+                    }
+                }
+
+                if next == LIT_UNDEF {
+                    self.stats.decisions += 1;
+                    next = self.pick_branch_lit();
+                    if next == LIT_UNDEF {
+                        // model found
+                        return LBool::True;
+                    }
+                }
+
+                // create decision level
+                self.trail_lim.push(self.trail.len() as i32);
+                self.unchecked_enqueue(next, CLAUSE_NONE);
+            }
+        }
+    }
+
+
+    fn within_budget(&self) -> bool {
+        !self.asynch_interrupt  
+            && (self.conflict_budget < 0 || (self.stats.conflicts as i64) < self.conflict_budget)
+            && (self.propagation_budget < 0 || (self.stats.propagations as i64) < self.propagation_budget)
+    }
+
+
+    fn luby(y :f64, mut x :i32) -> f64 {
+        let mut size = 1;
+        let mut seq = 0;
+        while size < x+1 {
+            seq += 1;
+            size = 2*size + 1;
+        }
+
+        while size-1 != x {
+            size = (size-1) >> 1;
+            seq -= 1;
+            x = x % size;
+        }
+
+        return y.powf(seq as f64);
+    }
+
+    fn solve(&mut self) -> LBool {
+        self.model.clear();
+        self.conflict.clear();
+        if !self.ok { return LBool::False; }
+
+        self.stats.solves += 1;
+
+        self.max_learnts = ((self.clauses.len() as f64) * self.params.learntsize_factor)
+            .max(self.params.min_learnts_lim as f64);
+
+        self.learntsize_adjust_confl = self.params.learntsize_adjust_start_confl as f64;
+        self.learntsize_adjust_cnt = self.learntsize_adjust_confl as i32;
+        let mut status = LBool::Undef;
+
+        if self.verbosity >= 1 {
+            println!("* search statsitics");
+        }
+
+        let mut curr_restarts = 0;
+        while status == LBool::Undef {
+            let rest_base = if self.params.luby_restart {
+                Self::luby(self.params.restart_inc, curr_restarts)
+            } else {
+                self.params.restart_inc.powf(curr_restarts as f64)
+            };
+
+            status = self.search((rest_base*self.params.restart_first as f64) as i32);
+            if !self.within_budget() { break; }
+            curr_restarts += 1;
+        }
+
+        if self.verbosity >= 1 {
+            println!("---");
+        }
+
+        if status == LBool::True {
+            self.model.resize(self.next_var as usize, LBool::Undef);
+            for v in (0..self.next_var).map(|i| Var(i)) {
+                self.model[v.idx()] = self.var_value(v);
+            }
+        } else if status == LBool::False && self.conflict.len() == 0 {
+            self.ok = false;
+        }
+
+        self.cancel_until(0);
+        status
+    }
+
+
 }
 
 fn var_map_insert<T: Default + Clone>(map: &mut Vec<T>, Var(idx): Var, value: T, default: T) {
