@@ -8,3 +8,6 @@ edition = "2018"
 
 [dependencies]
 bitfield = "0.13"
+dimacs = "0.2"
+log = "0.4"
+simple_logger = "1.6"
