@@ -1,5 +1,6 @@
 use log::{info, trace, debug};
 use bitfield::bitfield;
+use std::io::Write;
 
 // ------
 // Variables and literals
@@ -9,6 +10,8 @@ use bitfield::bitfield;
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct Var(i32);
 const VAR_UNDEF: Var = Var(-1);
+
+static mut TRACELOG_FILE : Option<std::io::BufWriter<std::fs::File>> = None;
 
 impl Var {
     fn idx(&self) -> usize {
@@ -295,6 +298,17 @@ impl ClauseDatabase {
         new_addr
     }
 
+    fn update_size(&mut self, cref :ClauseHeaderOffset, new_size :usize) {
+        let mut header = self.get_header(cref);
+        if header.get_extra_data() {
+            let activity_addr = self.get_activity_address(cref);
+            self.clause_data[cref as usize + 1 + new_size] = 
+                self.clause_data[activity_addr];
+        }
+        header.set_size(new_size as u32);
+        *self.get_header_mut(cref) = header;
+    }
+
     fn free(&mut self, cref: ClauseHeaderOffset) {
         let header = self.get_header(cref);
         self.wasted += 1 + header.get_size() + header.get_extra_data() as u32;
@@ -330,15 +344,18 @@ impl ClauseDatabase {
         cref
     }
 
-    fn get_activity<'a>(&'a self, header_addr: ClauseHeaderOffset) -> &'a f32 {
+    fn get_activity_address(&self, header_addr :ClauseHeaderOffset) -> usize {
         let header = self.get_header(header_addr);
         assert!(header.get_extra_data());
         assert!(header.get_learnt());
+
+        header_addr as usize + 1 + header.get_size() as usize
+    }
+
+    fn get_activity<'a>(&'a self, header_addr: ClauseHeaderOffset) -> &'a f32 {
+        let addr = self.get_activity_address(header_addr);
         unsafe {
-            let ptr = (&self.clause_data[header_addr as usize] as *const u32 as *const f32)
-                //.offset((1 + header.get_size()) as isize * std::mem::size_of::<u32>() as isize);
-                .offset(1 + header.get_size() as isize);
-            &*ptr
+            std::mem::transmute(&self.clause_data[addr])
         }
     }
 
@@ -1504,15 +1521,17 @@ impl Solver {
                     Self::assigns_lit_value(&self.assigns, lits[0]) == LBOOL_UNDEF
                         || Self::assigns_lit_value(&self.assigns, lits[1]) == LBOOL_UNDEF
                 );
-                let mut k = 2;
-                while k < lits.len() {
+                let mut k :usize = 2;
+                let mut new_len = header.get_size() as usize;
+                while k < new_len {
                     if Self::assigns_lit_value(&self.assigns, lits[k]) == LBOOL_FALSE {
-                        lits[k] = lits[lits.len() - 1];
+                        new_len -= 1;
+                        lits[k] = lits[new_len];
                         k -= 1;
                     }
                     k += 1;
                 }
-                header.set_size(k as u32);
+                self.clause_database.update_size(cref, new_len);
 
                 // keep
                 clauses[j] = clauses[i];
@@ -1543,6 +1562,8 @@ impl Solver {
     }
 
     fn simplify(&mut self) -> bool {
+
+
         assert!(self.trail_lim.len() == 0);
         debug!("simplify called at decisionlevel=0 with trail length={}", self.trail.len());
         if !self.ok || self.propagate() != CLAUSE_NONE {
@@ -1553,6 +1574,8 @@ impl Solver {
         if (self.trail.len() as i32) == self.simp_db_assigns || self.simp_db_props > 0 {
             return true;
         }
+
+        unsafe { write!(TRACELOG_FILE.as_mut().unwrap(), "simp\n").unwrap(); }
 
         // TODO do not move/allocate here.
         debug!("remove satisfied learnt clauses ({})", self.learnts.len());
@@ -1621,9 +1644,18 @@ impl Solver {
 
                 learnt_clause.clear();
                 trace!("Conflict in {}", conflict_clause);
+
                 let backtrack_level = self.analyze(conflict_clause, &mut learnt_clause);
+
+                unsafe { write!(TRACELOG_FILE.as_mut().unwrap(), "a2").unwrap(); }
+                for x in &learnt_clause {
+                    unsafe { write!(TRACELOG_FILE.as_mut().unwrap(), " {} ", x.0).unwrap(); }
+                }
+                unsafe { write!(TRACELOG_FILE.as_mut().unwrap(), "\n").unwrap(); }
+
                 trace!("learnt {:?}", (&backtrack_level,&learnt_clause));
                 trace!("Backtrack to {}", backtrack_level);
+                unsafe { write!(TRACELOG_FILE.as_mut().unwrap(), "backtrack_level {}\n", backtrack_level).unwrap(); }
                 trace!("LEARNT {:?}", learnt_clause);
                 self.cancel_until(backtrack_level);
 
@@ -1879,6 +1911,11 @@ fn main() {
     info!("* reading file {}", filename);
     let time_start = cpu_time::ProcessTime::now();
     let mut solver = Solver::from_dimacs_filename(filename);
+
+    unsafe { TRACELOG_FILE = Some(
+            std::io::BufWriter::new(
+            std::fs::File::create("sat2.log").unwrap())); }
+
     info!(" - parse time: {:.2}s", cpu_time::ProcessTime::now().duration_since(time_start).as_millis() as f64 / 1000.0);
     info!("* problem statistics:");
     info!("  - vars: {}", solver.next_var);
@@ -1889,5 +1926,7 @@ fn main() {
     solver.stats_info(solve_start);
     info!("");
     info!("* result: {}", if result == LBOOL_TRUE { "SAT" } else if result == LBOOL_FALSE { "UNSAT" } else { "UNKNOWN" });
+
+    unsafe { TRACELOG_FILE.take(); }
 
 }
