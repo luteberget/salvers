@@ -1,55 +1,99 @@
-
-use log::{info, trace, debug};
 use bitfield::bitfield;
+use log::{debug, info, trace};
 use std::io::Write;
 
 // theory
+//
+
+#[derive(Copy, Clone)]
+pub enum Check {
+    Assert,
+    Propagate,
+    Final,
+}
+
+pub struct Refinement {
+    last_clause_idx: i32,
+    data: Vec<i32>,
+}
+
+impl Refinement {
+    pub fn new() -> Self {
+        Refinement {
+            last_clause_idx: -1,
+            data: Vec::new(),
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.data.clear();
+        self.last_clause_idx = -1;
+    }
+
+    pub fn new_clause(&mut self) {
+        self.last_clause_idx = self.data.len() as i32;
+        self.data.push(0);
+    }
+
+    pub fn add_deduced(&mut self, lit: Lit, rref: u32) {
+        self.data.push(-1);
+        self.data.push(lit.0);
+        self.data.push(rref as i32);
+        self.last_clause_idx = -1;
+    }
+
+    pub fn add_clause_lit(&mut self, lit: Lit) {
+        assert!(self.last_clause_idx >= 0 && self.last_clause_idx < self.data.len() as i32);
+        self.data[self.last_clause_idx as usize] += 1;
+        self.data.push(lit.0);
+    }
+}
+
+//pub enum Refinement {
+//    DeducedLit(Lit, u32),
+//    NewClause(u32), // length
+//    ClauseLit(
+//}
+//
+//pub enum Refinement {
+//    NewClause,
+//    DeducedLit(Lit, u32),
+//}
 
 pub trait Theory {
+    fn check(&mut self, ch: Check, new_lits: &[Lit], refinement: &mut Refinement);
+    fn explain(&mut self, lit: Lit, lref: u32, refinement: &mut Refinement);
     fn new_decision_level(&mut self);
-    fn backtrack(&mut self, level :i32);
-    fn assume(&mut self, l :Lit);
-    fn check(&mut self, approx :bool) -> LBool;
-    fn get_next_implied(&mut self) -> Lit;
-    fn get_conflict(&mut self) -> Vec<Lit>;
-    fn get_explanation(&mut self, implied :Lit) -> Option<Vec<Lit>>;
-    fn get_lemma(&mut self) -> Option<Vec<Lit>>;
+    fn backtrack(&mut self, n: i32);
 }
 
-pub struct EmptyTheory {}
-impl Theory for EmptyTheory {
+pub struct NullTheory {}
+impl Theory for NullTheory {
+    fn check(&mut self, _: Check, _: &[Lit], _: &mut Refinement) {}
+    fn explain(&mut self, _: Lit, _: u32, _: &mut Refinement) {} // unreachable
     fn new_decision_level(&mut self) {}
-    fn backtrack(&mut self, _ :i32) {}
-    fn assume(&mut self, _ :Lit) {}
-    fn check(&mut self, _ :bool) -> LBool { LBOOL_TRUE }
-    fn get_conflict(&mut self) -> Vec<Lit> { unreachable!() }
-    fn get_explanation(&mut self, _ :Lit) -> Option<Vec<Lit>> { None }
-    fn get_lemma(&mut self) -> Option<Vec<Lit>> { None }
+    fn backtrack(&mut self, _: i32) {}
 }
-
 
 pub struct SatSolver {
-    pub prop :Solver<EmptyTheory>,
+    pub prop: Solver<NullTheory>,
 }
 
 impl SatSolver {
     pub fn new() -> Self {
-        SatSolver { prop: Solver::new(EmptyTheory {}) }
+        SatSolver {
+            prop: Solver::new(NullTheory {}),
+        }
     }
 }
-
-
-
 
 // ------
 // Variables and literals
 // ------
 
-#[derive(Debug)]
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Var(pub i32);
 const VAR_UNDEF: Var = Var(-1);
-
 
 impl Var {
     fn idx(&self) -> usize {
@@ -57,8 +101,7 @@ impl Var {
     }
 }
 
-#[derive(Debug)]
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Lit(pub i32);
 
 impl Lit {
@@ -91,19 +134,18 @@ pub const LIT_ERROR: Lit = Lit(-1);
 //    Undef = 2,
 //}
 
-#[derive(Debug)]
-#[derive(Copy,Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct LBool(u8);
 
 impl PartialEq for LBool {
-    fn eq(&self, rhs :&LBool) -> bool {
+    fn eq(&self, rhs: &LBool) -> bool {
         ((rhs.0 & 2) & (self.0 & 2)) != 0 || (((rhs.0 & 2) == 0) && rhs.0 == self.0)
     }
 }
 
-pub const LBOOL_TRUE :LBool = LBool(0);
-pub const LBOOL_FALSE :LBool = LBool(1);
-pub const LBOOL_UNDEF :LBool = LBool(2);
+pub const LBOOL_TRUE: LBool = LBool(0);
+pub const LBOOL_FALSE: LBool = LBool(1);
+pub const LBOOL_UNDEF: LBool = LBool(2);
 
 impl LBool {
     fn xor(&self, b: bool) -> LBool {
@@ -118,7 +160,9 @@ impl LBool {
 }
 
 impl Default for LBool {
-    fn default() -> Self { LBOOL_UNDEF }
+    fn default() -> Self {
+        LBOOL_UNDEF
+    }
 }
 
 // TODO &&, ||
@@ -135,7 +179,8 @@ bitfield! {
 
 type ClauseHeaderOffset = i32;
 const CLAUSE_NONE: ClauseHeaderOffset = -1;
-const CLAUSE_THEORY: ClauseHeaderOffset = -2;
+const CLAUSE_THEORY_UNDEF: ClauseHeaderOffset = -2;
+const CLAUSE_THEORY_REFERENCE: ClauseHeaderOffset = -3;
 
 type VMap<T> = Vec<T>;
 
@@ -151,8 +196,7 @@ struct ShrinkStackElem {
 }
 
 // derive copy?
-#[derive(Debug)]
-#[derive(Clone, PartialEq, Eq, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 struct Watcher {
     cref: ClauseHeaderOffset,
     blocker: Lit,
@@ -201,19 +245,19 @@ impl OrderHeap {
         let var = self.heap[i as usize];
 
         let mut p = Self::parent(i);
-        trace!("percolate up i={},x={},p={}",i,var.0,p);
+        trace!("percolate up i={},x={},p={}", i, var.0, p);
         //info!("act x {} heap[p] {}", act[var.0 as usize, act[self.heap[p as usize].0 as usize]);
         while i != 0 && act[var.0 as usize] > act[self.heap[p as usize].0 as usize] {
             self.heap[i as usize] = self.heap[p as usize];
             self.indices[self.heap[p as usize].0 as usize] = i;
             i = p;
             p = Self::parent(p);
-            trace!("percolate up i={},x={},p={}",i,var.0,p);
+            trace!("percolate up i={},x={},p={}", i, var.0, p);
         }
 
         self.heap[i as usize] = var;
         self.indices[var.0 as usize] = i;
-        trace!("percolate done i={},x={},p={}",i,var.0,p);
+        trace!("percolate done i={},x={},p={}", i, var.0, p);
     }
 
     pub fn percolate_down(&mut self, mut i: i32, act: &[f64]) {
@@ -271,7 +315,8 @@ impl OrderHeap {
 
     pub fn insert(&mut self, key: Var, act: &[f64]) {
         //trace!("OrderHeap.insert key{:?}", key);
-        self.indices.resize((key.0 as usize + 1).max(self.indices.len()), -1);
+        self.indices
+            .resize((key.0 as usize + 1).max(self.indices.len()), -1);
         //trace!("indices {:?}", self.indices);
         debug_assert!(!self.contains(key));
 
@@ -337,12 +382,11 @@ impl ClauseDatabase {
         new_addr
     }
 
-    fn update_size(&mut self, cref :ClauseHeaderOffset, new_size :usize) {
+    fn update_size(&mut self, cref: ClauseHeaderOffset, new_size: usize) {
         let mut header = self.get_header(cref);
         if header.get_extra_data() {
             let activity_addr = self.get_activity_address(cref);
-            self.clause_data[cref as usize + 1 + new_size] = 
-                self.clause_data[activity_addr];
+            self.clause_data[cref as usize + 1 + new_size] = self.clause_data[activity_addr];
         }
         header.set_size(new_size as u32);
         *self.get_header_mut(cref) = header;
@@ -383,7 +427,7 @@ impl ClauseDatabase {
         cref
     }
 
-    fn get_activity_address(&self, header_addr :ClauseHeaderOffset) -> usize {
+    fn get_activity_address(&self, header_addr: ClauseHeaderOffset) -> usize {
         let header = self.get_header(header_addr);
         assert!(header.get_extra_data());
         assert!(header.get_learnt());
@@ -393,9 +437,7 @@ impl ClauseDatabase {
 
     fn get_activity<'a>(&'a self, header_addr: ClauseHeaderOffset) -> &'a f32 {
         let addr = self.get_activity_address(header_addr);
-        unsafe {
-            std::mem::transmute(&self.clause_data[addr])
-        }
+        unsafe { std::mem::transmute(&self.clause_data[addr]) }
     }
 
     fn get_activity_mut<'a>(&'a mut self, header_addr: ClauseHeaderOffset) -> &'a mut f32 {
@@ -427,7 +469,7 @@ impl ClauseDatabase {
             let ptr = (self.clause_data.get_mut(header_addr as usize).unwrap() as *mut u32
                 as *mut Lit)
                 //.offset(std::mem::size_of::<ClauseHeader>() as isize);
-                .offset(1);//std::mem::size_of::<ClauseHeader>() as isize);
+                .offset(1); //std::mem::size_of::<ClauseHeader>() as isize);
             std::slice::from_raw_parts_mut(ptr, size)
         };
         (header, lits)
@@ -461,8 +503,8 @@ impl ClauseDatabase {
         //let offset = std::mem::size_of::<ClauseHeader>() as isize;
         //println!("offset {:?}", offset);
         unsafe {
-            let ptr = (&self.clause_data[header_addr as usize] as *const u32 as *const Lit)
-                .offset(1);
+            let ptr =
+                (&self.clause_data[header_addr as usize] as *const u32 as *const Lit).offset(1);
             std::slice::from_raw_parts(ptr, size)
         }
     }
@@ -475,7 +517,7 @@ impl ClauseDatabase {
             let ptr = (self.clause_data.get_mut(header_addr as usize).unwrap() as *mut u32
                 as *mut ClauseHeaderOffset)
                 //.offset(std::mem::size_of::<ClauseHeader>() as isize);
-                .offset(1);//std::mem::size_of::<ClauseHeader>() as isize);
+                .offset(1); //std::mem::size_of::<ClauseHeader>() as isize);
             &mut *ptr
         }
     }
@@ -489,15 +531,15 @@ impl ClauseDatabase {
             let ptr = (self.clause_data.get_mut(header_addr as usize).unwrap() as *mut u32
                 as *mut Lit)
                 //.offset(std::mem::size_of::<ClauseHeader>() as isize);
-                .offset(1);//std::mem::size_of::<ClauseHeader>() as isize);
+                .offset(1); //std::mem::size_of::<ClauseHeader>() as isize);
             std::slice::from_raw_parts_mut(ptr, size)
         }
     }
 }
 
 pub struct Solver<Theory> {
-    theory :Theory,
-    pub tracelog_file : Option<std::io::BufWriter<std::fs::File>>,
+    theory: Theory,
+    pub tracelog_file: Option<std::io::BufWriter<std::fs::File>>,
 
     pub verbosity: u32,
     // Extra results (read-only for consumer)
@@ -534,9 +576,12 @@ pub struct Solver<Theory> {
     cla_inc: f64,
     var_inc: f64,
     qhead: usize,
+    theory_qhead: usize,
+    theory_refinement_buffer: Refinement,
+
     simp_db_assigns: i32,
     simp_db_props: i64,
-    // TODO 
+    // TODO
     //progress_estimate: f64,
     remove_satisfied: bool,
     next_var: i32,
@@ -618,13 +663,17 @@ pub struct SolverStatistics {
     tot_literals: usize,
 }
 
-impl<Theory : crate::Theory> Solver<Theory> {
-    pub fn num_vars(&self) -> usize { self.next_var as usize }
-    pub fn num_clauses(&self) -> usize { self.clauses.len() }
-    pub fn new(theory :Theory) -> Self {
+impl<Theory: crate::Theory> Solver<Theory> {
+    pub fn num_vars(&self) -> usize {
+        self.next_var as usize
+    }
+    pub fn num_clauses(&self) -> usize {
+        self.clauses.len()
+    }
+    pub fn new(theory: Theory) -> Self {
         Solver {
             theory: theory,
-            tracelog_file:None,
+            tracelog_file: None,
             verbosity: 1,
             watch_occs: Vec::new(),
             watch_dirty: Vec::new(),
@@ -645,6 +694,8 @@ impl<Theory : crate::Theory> Solver<Theory> {
             cla_inc: 1.0,
             var_inc: 1.0,
             qhead: 0,
+            theory_qhead: 0,
+            theory_refinement_buffer: Refinement::new(),
             simp_db_assigns: -1,
             simp_db_props: 0,
             //progress_estimate: 0.0,
@@ -738,7 +789,8 @@ impl<Theory : crate::Theory> Solver<Theory> {
         var_map_insert(&mut self.seen, var, Default::default(), Default::default());
         var_map_insert(&mut self.polarity, var, 1, 1);
         var_map_insert(&mut self.user_pol, var, user_polarity, Default::default());
-        self.decision.resize((var.0 as usize + 1).max(self.decision.len()), 0);
+        self.decision
+            .resize((var.0 as usize + 1).max(self.decision.len()), 0);
         self.set_decision_var(var, decision_var);
         // trail.capacity(v+1) // not needed?
 
@@ -828,7 +880,7 @@ impl<Theory : crate::Theory> Solver<Theory> {
     }
 
     pub fn add_clause(&mut self, ps: impl Iterator<Item = Lit>) -> bool {
-        // Add "original" clause, cannot be direclty used
+        // Add "original" clause, cannot be directly used
         // during search because of simplification.
         assert!(self.trail_lim.len() == 0);
         if !self.ok {
@@ -884,8 +936,18 @@ impl<Theory : crate::Theory> Solver<Theory> {
         //println!("");
 
         if header.get_learnt() {
-            trace!("watch {:?} -> {:?} (cr={})", lits[0].inverse(), lits[1], cref);
-            trace!("watch {:?} -> {:?} (cr={})", lits[1].inverse(), lits[0], cref);
+            trace!(
+                "watch {:?} -> {:?} (cr={})",
+                lits[0].inverse(),
+                lits[1],
+                cref
+            );
+            trace!(
+                "watch {:?} -> {:?} (cr={})",
+                lits[1].inverse(),
+                lits[0],
+                cref
+            );
         }
 
         self.watch_occs[lits[0].inverse().0 as usize].push(Watcher {
@@ -1000,22 +1062,31 @@ impl<Theory : crate::Theory> Solver<Theory> {
                 {
                     self.polarity[x.var().0 as usize] = x.sign() as i8;
                 }
-                trace!("The decision var was {:?}/{:?}, putting it back into the queue", x, x.var());
+                trace!(
+                    "The decision var was {:?}/{:?}, putting it back into the queue",
+                    x,
+                    x.var()
+                );
                 self.insert_var_order(x.var());
                 c -= 1;
             }
 
-            trace!("qhead {} -> {}", self.qhead, self.trail_lim[level as usize] as usize);
+            trace!(
+                "qhead {} -> {}",
+                self.qhead,
+                self.trail_lim[level as usize] as usize
+            );
             self.qhead = self.trail_lim[level as usize] as usize;
+            self.theory_qhead = self.qhead;
             let l1 = self.trail.len();
             self.trail.truncate(self.trail_lim[level as usize] as usize);
             trace!("traillen {} -> {}", l1, self.trail.len());
             let l2 = self.trail_lim.len();
             self.trail_lim.truncate(level as usize);
             trace!("traillen {} -> {}", l2, self.trail_lim.len());
-        }
 
-        self.theory.backtrack(level);
+            self.theory.backtrack(level);
+        }
     }
 
     fn pick_branch_lit(&mut self) -> Lit {
@@ -1043,7 +1114,7 @@ impl<Theory : crate::Theory> Solver<Theory> {
                 next = VAR_UNDEF;
                 break;
             } else {
-                trace!("order_heap.remove_min {}",self.order_heap.heap[0].0);
+                trace!("order_heap.remove_min {}", self.order_heap.heap[0].0);
                 next = self.order_heap.remove_min(&self.activity);
             }
         }
@@ -1075,7 +1146,7 @@ impl<Theory : crate::Theory> Solver<Theory> {
         mut conflict_clause: ClauseHeaderOffset,
         out_learnt: &mut Vec<Lit>,
     ) -> i32 {
-        trace!("--> ANALYZE cref{}",conflict_clause);
+        trace!("--> ANALYZE cref{}", conflict_clause);
         let mut path_c = 0;
         let mut p = LIT_UNDEF;
         out_learnt.push(Lit(0));
@@ -1089,7 +1160,9 @@ impl<Theory : crate::Theory> Solver<Theory> {
             if header.get_learnt() {
                 assert!(header.get_extra_data());
                 self.clause_bump_activity(conflict_clause);
-            } else { trace!("conflict is orig clause"); }
+            } else {
+                trace!("conflict is orig clause");
+            }
 
             let lits = self
                 .clause_database
@@ -1118,11 +1191,13 @@ impl<Theory : crate::Theory> Solver<Theory> {
             trace!("index_c {}", index);
             loop {
                 index -= 1;
-                if self.seen[self.trail[index+1].var().idx()] != 0 { break; }
+                if self.seen[self.trail[index + 1].var().idx()] != 0 {
+                    break;
+                }
             }
             trace!("index_b {}", index);
             p = self.trail[index + 1];
-            conflict_clause = self.vardata[p.var().idx()].reason;
+            conflict_clause = self.get_reason(p.var());
             self.seen[p.var().idx()] = 0;
             path_c -= 1;
 
@@ -1130,7 +1205,6 @@ impl<Theory : crate::Theory> Solver<Theory> {
                 break;
             }
         }
-
 
         out_learnt[0] = p.inverse();
         trace!("ANALYZE TRACED out learnt {:?}", out_learnt);
@@ -1206,9 +1280,10 @@ impl<Theory : crate::Theory> Solver<Theory> {
         let mut p = p;
         'outer: loop {
             i += 1;
-            trace!(" lit redundant i={}",i);
+            trace!(" lit redundant i={}", i);
 
-            let reason = self.vardata[p.var().idx()].reason;
+            //let reason = self.vardata[p.var().idx()].reason;
+            let reason = self.get_reason(p.var());
             let header = self.clause_database.get_header(reason);
             let lits = self
                 .clause_database
@@ -1227,7 +1302,8 @@ impl<Theory : crate::Theory> Solver<Theory> {
                 }
 
                 // Check variable can not be removed for some local reason
-                if self.vardata[l.var().idx()].reason == CLAUSE_NONE
+                let local_reason = self.get_reason(l.var()); // TODO why is this call allowed when lits is borrowed?
+                if local_reason == CLAUSE_NONE
                     || self.seen[l.var().idx()] == Seen::Failed as i8
                 {
                     self.analyze_stack.push(ShrinkStackElem { i: 0, l: p });
@@ -1261,7 +1337,6 @@ impl<Theory : crate::Theory> Solver<Theory> {
                     return true; // success if stack is empty
                 }
             }
-
         }
     }
 
@@ -1280,7 +1355,8 @@ impl<Theory : crate::Theory> Solver<Theory> {
         while i >= self.trail_lim[0] as usize {
             let var = self.trail[i].var();
             if self.seen[var.idx()] > 0 {
-                let reason = self.vardata[var.idx()].reason;
+                //let reason = self.vardata[var.idx()].reason;
+                let reason = self.get_reason(var);
                 if reason == CLAUSE_NONE {
                     assert!(self.vardata[var.idx()].level > 0);
                     self.conflict.push(self.trail[i].inverse());
@@ -1311,7 +1387,6 @@ impl<Theory : crate::Theory> Solver<Theory> {
             level: self.trail_lim.len() as i32,
         };
         self.trail.push(lit);
-        self.theory.assume(lit);
     }
 
     fn propagate_bool(&mut self) -> ClauseHeaderOffset {
@@ -1362,9 +1437,7 @@ impl<Theory : crate::Theory> Solver<Theory> {
                     blocker: first,
                 };
                 // If 0th watch is true, then the clause is already satisfied
-                if first != blocker
-                    && Self::assigns_lit_value(assigns, first) == LBOOL_TRUE
-                {
+                if first != blocker && Self::assigns_lit_value(assigns, first) == LBOOL_TRUE {
                     watches[j] = w;
                     j += 1;
                     trace!("0th true {:?}", first);
@@ -1392,10 +1465,20 @@ impl<Theory : crate::Theory> Solver<Theory> {
                 watches[j] = w;
                 j += 1;
                 if Self::assigns_lit_value(assigns, first) == LBOOL_FALSE {
-                    trace!("found conflict {}/{}", cref, self.clause_database.clause_data.len());
-                    trace!("original clause idx {:?}", self.clauses.iter().position(|i| *i == cref));
+                    trace!(
+                        "found conflict {}/{}",
+                        cref,
+                        self.clause_database.clause_data.len()
+                    );
+                    trace!(
+                        "original clause idx {:?}",
+                        self.clauses.iter().position(|i| *i == cref)
+                    );
                     //trace!("{:?}", self.clauses);
-                    trace!("learnt   clause idx {:?}", self.learnts.iter().position(|i| *i == cref));
+                    trace!(
+                        "learnt   clause idx {:?}",
+                        self.learnts.iter().position(|i| *i == cref)
+                    );
                     conflict_clause = cref;
                     self.qhead = self.trail.len();
                     while i < self.watch_occs[p.0 as usize].len() {
@@ -1410,7 +1493,7 @@ impl<Theory : crate::Theory> Solver<Theory> {
                 }
             }
 
-            self.watch_occs[p.0 as usize].truncate( j);
+            self.watch_occs[p.0 as usize].truncate(j);
         }
         trace!("propagated  {}", num_props);
         self.stats.propagations += num_props;
@@ -1426,7 +1509,7 @@ impl<Theory : crate::Theory> Solver<Theory> {
         {
             use std::cmp::Ordering;
             let db = &self.clause_database;
-        //info!("reduce_db sorted?");
+            //info!("reduce_db sorted?");
             self.learnts.sort_by(|x, y| {
                 //dbg!(db.get_header(*x));
                 //dbg!(db.get_header(*y));
@@ -1441,7 +1524,7 @@ impl<Theory : crate::Theory> Solver<Theory> {
                     Ordering::Greater
                 }
             });
-        //info!("reduce_db sorted");
+            //info!("reduce_db sorted");
         }
 
         let (mut i, mut j) = (0, 0);
@@ -1464,7 +1547,7 @@ impl<Theory : crate::Theory> Solver<Theory> {
             }
             i += 1;
         }
-        self.learnts.truncate( j);
+        self.learnts.truncate(j);
         //info!("check garbage from reduce_db");
         self.check_garbage();
     }
@@ -1485,6 +1568,14 @@ impl<Theory : crate::Theory> Solver<Theory> {
         self.reloc_all_clauses(&mut new_data);
         std::mem::swap(&mut self.clause_database.clause_data, &mut new_data);
         self.clause_database.wasted = 0;
+    }
+
+    fn has_reason_clause(&self, var :Var) -> bool {
+        self.vardata[var.idx()].reason >= 0
+    }
+
+    fn get_reason(&mut self, var :Var) -> ClauseHeaderOffset {
+        self.vardata[var.idx()].reason
     }
 
     fn reloc_all_clauses(&mut self, new_data: &mut Vec<u32>) {
@@ -1512,7 +1603,8 @@ impl<Theory : crate::Theory> Solver<Theory> {
         // relocate reasons
         for i in 0..self.trail.len() {
             let var = self.trail[i].var();
-            let reason = self.vardata[var.idx()].reason;
+            if !self.has_reason_clause(var) { continue; }
+            let reason = self.get_reason(var);
             if reason != CLAUSE_NONE {
                 let header = self.clause_database.get_header(reason);
                 let lits = self
@@ -1526,13 +1618,14 @@ impl<Theory : crate::Theory> Solver<Theory> {
             }
         }
 
-
         // relocate learnt clauses
-        let (mut i, mut j) = (0,0);
+        let (mut i, mut j) = (0, 0);
         while i < self.learnts.len() {
             let header = self.clause_database.get_header(self.learnts[i]);
             if header.get_mark() != 1 {
-                self.learnts[i] = self.clause_database.relocate_clause(self.learnts[i], new_data);
+                self.learnts[i] = self
+                    .clause_database
+                    .relocate_clause(self.learnts[i], new_data);
                 self.learnts[j] = self.learnts[i];
                 j += 1;
             }
@@ -1541,11 +1634,13 @@ impl<Theory : crate::Theory> Solver<Theory> {
         self.learnts.truncate(j);
 
         // relocate original clauses
-        let (mut i, mut j) = (0,0);
+        let (mut i, mut j) = (0, 0);
         while i < self.clauses.len() {
             let header = self.clause_database.get_header(self.clauses[i]);
             if header.get_mark() != 1 {
-                self.clauses[i] = self.clause_database.relocate_clause(self.clauses[i], new_data);
+                self.clauses[i] = self
+                    .clause_database
+                    .relocate_clause(self.clauses[i], new_data);
                 self.clauses[j] = self.clauses[i];
                 j += 1;
             }
@@ -1569,7 +1664,7 @@ impl<Theory : crate::Theory> Solver<Theory> {
                     Self::assigns_lit_value(&self.assigns, lits[0]) == LBOOL_UNDEF
                         || Self::assigns_lit_value(&self.assigns, lits[1]) == LBOOL_UNDEF
                 );
-                let mut k :usize = 2;
+                let mut k: usize = 2;
                 let mut new_len = header.get_size() as usize;
                 while k < new_len {
                     if Self::assigns_lit_value(&self.assigns, lits[k]) == LBOOL_FALSE {
@@ -1610,10 +1705,11 @@ impl<Theory : crate::Theory> Solver<Theory> {
     }
 
     fn simplify(&mut self) -> bool {
-
-
         assert!(self.trail_lim.len() == 0);
-        debug!("simplify called at decisionlevel=0 with trail length={}", self.trail.len());
+        debug!(
+            "simplify called at decisionlevel=0 with trail length={}",
+            self.trail.len()
+        );
         if !self.ok || self.propagate_bool() != CLAUSE_NONE {
             self.ok = false;
             return false;
@@ -1645,8 +1741,10 @@ impl<Theory : crate::Theory> Solver<Theory> {
             }
 
             let seen = &mut self.seen;
+            assert!(self.qhead == self.trail.len());
             self.trail.retain(|l| seen[l.var().idx()] == 0);
             self.qhead = self.trail.len();
+            self.theory_qhead = self.qhead; // TODO does this work correctly with theory?
             for v in self.released_vars.iter() {
                 self.seen[v.idx()] = 0;
             }
@@ -1657,7 +1755,8 @@ impl<Theory : crate::Theory> Solver<Theory> {
         self.rebuild_order_heap();
 
         self.simp_db_assigns = self.trail.len() as i32;
-        self.simp_db_props = self.stats.clauses_literals as i64 + self.stats.learnts_literals as i64;
+        self.simp_db_props =
+            self.stats.clauses_literals as i64 + self.stats.learnts_literals as i64;
 
         true
     }
@@ -1672,19 +1771,184 @@ impl<Theory : crate::Theory> Solver<Theory> {
         self.order_heap.build(&vs, &self.activity);
     }
 
-    fn propagate(&mut self) {
-        let conflict_clause = while self.qhead < self.trail.len() {
+    fn propagate(&mut self) -> ClauseHeaderOffset {
+        while self.qhead < self.trail.len() {
             let bool_prop = self.propagate_bool();
-            if bool_prop != CLAUSE_NONE { break bool_prop; }
-
-            let are_all_assigned = self.order_heap.is_empty();
-            // check is a generator of 
-            let theory_ok = self.theory.check(are_all_assigned);
-            if theory_ok == LBOOL_FALSE { 
-                break CLAUSE_THEORY; 
-            } else if theory_ok == LBOOL_TRUE {
+            if bool_prop != CLAUSE_NONE {
+                return bool_prop;
             }
-        };
+            assert!(self.qhead == self.trail.len()); // boolean prop finished without conflict
+
+            let are_all_assigned = self.order_heap.is_empty() && self.qhead == self.trail.len();
+            let check = if are_all_assigned {
+                Check::Final
+            } else {
+                Check::Propagate
+            };
+            let new_lits = &self.trail[self.theory_qhead..self.trail.len()];
+            self.theory_qhead = self.trail.len();
+            self.theory_refinement_buffer.clear();
+            self.theory
+                .check(check, new_lits, &mut self.theory_refinement_buffer);
+            let theory_conflict = self.theory_refinement();
+            if theory_conflict != CLAUSE_NONE {
+                return theory_conflict;
+            }
+        }
+
+        CLAUSE_NONE
+    }
+
+    fn theory_refinement(&mut self) -> ClauseHeaderOffset {
+        // first pass: push deductions to trail or convert them to conflicts
+        {
+            let mut i = 0;
+            while i < self.theory_refinement_buffer.data.len() {
+                if self.theory_refinement_buffer.data[i] == -1 {
+                    let p = Lit(self.theory_refinement_buffer.data[i + 1]);
+                    let rref = self.theory_refinement_buffer.data[i + 2] as u32;
+                    if self.lit_value(p) == LBOOL_UNDEF {
+                        self.unchecked_enqueue(p, CLAUSE_THEORY_REFERENCE - (rref as i32));
+                    } else if self.lit_value(p) == LBOOL_FALSE {
+                        let pre_len = self.theory_refinement_buffer.data.len();
+                        self.theory
+                            .explain(p, rref, &mut self.theory_refinement_buffer);
+                        assert!(
+                            self.theory_refinement_buffer.data.len() > pre_len
+                                && self.theory_refinement_buffer.data[pre_len] != -1
+                        ); // must have added a clause
+                    } else {
+                        // lit already set, ignore
+                    }
+                    i += 3;
+                } else {
+                    let len = self.theory_refinement_buffer.data[i] as usize;
+                    i += 1 + len;
+                }
+            }
+        }
+
+        let mut backtrack_level = self.trail_lim.len() as i32;
+        let mut conflict = CLAUSE_NONE;
+
+        // second pass: check for propagation and level to backtrack
+        {
+            let mut i = 0;
+            while i < self.theory_refinement_buffer.data.len() {
+                if self.theory_refinement_buffer.data[i] == -1 {
+                    i += 3;
+                } else {
+                    assert!(self.theory_refinement_buffer.data[i] >= 0);
+                    let len = self.theory_refinement_buffer.data[i] as usize;
+                    let clause_lits =
+                        &mut self.theory_refinement_buffer.data[(i + 1)..(i + 1 + len)];
+                    i += 1 + len;
+
+                    if len == 0 {
+                        backtrack_level = 0;
+                        conflict = CLAUSE_THEORY_UNDEF;
+                    } else {
+                        let assigns = &self.assigns;
+                        let vardata = &self.vardata;
+                        clause_lits.sort_by(|x, y| {
+                            use std::cmp::Ordering;
+                            let x_value = Self::assigns_lit_value(assigns, Lit(*x));
+                            let y_value = Self::assigns_lit_value(assigns, Lit(*y));
+                            if x_value == LBOOL_UNDEF && y_value == LBOOL_UNDEF {
+                                return x.cmp(y);
+                            }
+                            if x_value == LBOOL_UNDEF {
+                                return Ordering::Less;
+                            }
+                            if y_value == LBOOL_UNDEF {
+                                return Ordering::Greater;
+                            }
+                            if x_value == y_value {
+                                return vardata[Lit(*y).var().idx()]
+                                    .level
+                                    .cmp(&vardata[Lit(*x).var().idx()].level);
+                            } else {
+                                if x_value == LBOOL_TRUE {
+                                    return Ordering::Less;
+                                } else {
+                                    return Ordering::Greater;
+                                }
+                            }
+                        });
+
+                        if len == 1
+                            || Self::assigns_lit_value(&self.assigns, Lit(clause_lits[1]))
+                                == LBOOL_FALSE
+                        {
+                            let level = if len == 1 {
+                                0
+                            } else {
+                                self.vardata[Lit(clause_lits[1]).var().idx()].level
+                            };
+
+                            if Self::assigns_lit_value(&self.assigns, Lit(clause_lits[0]))
+                                != LBOOL_TRUE
+                                || self.vardata[Lit(clause_lits[0]).var().idx()].level > level
+                            {
+                                backtrack_level = backtrack_level.min(level);
+                            }
+                        }
+                    }
+                }
+            }
+
+            self.cancel_until(backtrack_level);
+        }
+
+        // third pass: attach clauses and enqueue propagations, determine conflict clause
+        {
+            let mut i = 0;
+            while i < self.theory_refinement_buffer.data.len() {
+                if self.theory_refinement_buffer.data[i] == -1 {
+                    i += 3;
+                } else {
+                    assert!(self.theory_refinement_buffer.data[i] >= 0);
+                    let len = self.theory_refinement_buffer.data[i] as usize;
+                    let clause_lits =
+                        &self.theory_refinement_buffer.data[(i + 1)..(i + 1 + len)];
+                    i += 1 + len;
+
+                    let mut new_cref = CLAUSE_NONE;
+                    if len > 1 {
+                        // attach
+                        new_cref = self.clause_database.add_clause(
+                            unsafe {
+                            std::mem::transmute::<&[i32],&[Lit]>(clause_lits)
+                            }, true);
+                        self.learnts.push(new_cref);
+                        self.attach_clause(new_cref);
+                    }
+
+                    let first = Lit(self.theory_refinement_buffer.data[i+2]);
+                    let second = Lit(self.theory_refinement_buffer.data[i+3]);
+                    if conflict == CLAUSE_NONE && Self::assigns_lit_value(&self.assigns, first) != LBOOL_TRUE {
+                        if len == 1
+                            || (Self::assigns_lit_value(&self.assigns, second)
+                                == LBOOL_FALSE && self.vardata[second.var().idx()].level <= backtrack_level) {
+
+                                if Self::assigns_lit_value(&self.assigns, first) == LBOOL_FALSE {
+
+                                    if len > 1 {
+                                        conflict = new_cref;
+                                    } else {
+                                        conflict = CLAUSE_THEORY_UNDEF;
+                                    }
+
+                                } else {
+                                    self.unchecked_enqueue(first, new_cref);
+                                }
+                        }
+                    }
+                }
+            }
+
+            conflict
+        }
     }
 
     fn search(&mut self, nof_conflicts: i32) -> LBool {
@@ -1717,9 +1981,14 @@ impl<Theory : crate::Theory> Solver<Theory> {
                 }
                 write!(self.tracelog_file.as_mut().unwrap(), "\n").unwrap();
 
-                trace!("learnt {:?}", (&backtrack_level,&learnt_clause));
+                trace!("learnt {:?}", (&backtrack_level, &learnt_clause));
                 trace!("Backtrack to {}", backtrack_level);
-                write!(self.tracelog_file.as_mut().unwrap(), "backtrack_level {}\n", backtrack_level).unwrap();
+                write!(
+                    self.tracelog_file.as_mut().unwrap(),
+                    "backtrack_level {}\n",
+                    backtrack_level
+                )
+                .unwrap();
                 trace!("LEARNT {:?}", learnt_clause);
                 self.cancel_until(backtrack_level);
 
@@ -1744,21 +2013,24 @@ impl<Theory : crate::Theory> Solver<Theory> {
                     self.learntsize_adjust_cnt = self.learntsize_adjust_confl as i32;
                     self.max_learnts *= self.params.learntsize_inc;
 
-                    info!(" > cfl{:>9} | vars {:>6} clauses {:>7} lits {:>6}",
-                            self.stats.conflicts,
-                            (self.stats.dec_vars as isize) - 
-                            if self.trail_lim.len() == 0 { self.trail.len() as isize }  else { self.trail_lim[0] as isize },
-                            self.clauses.len(),
-                            self.stats.clauses_literals,
-                          );
-                    info!(" -> learnt lim {:>8} clauses {:>8} lit/cl {:>8}",
-                          self.max_learnts as isize, 
-                          self.learnts.len(),
-                          (self.stats.learnts_literals as f64 / self.learnts.len() as f64) as isize
-                          );
-
-
-
+                    info!(
+                        " > cfl{:>9} | vars {:>6} clauses {:>7} lits {:>6}",
+                        self.stats.conflicts,
+                        (self.stats.dec_vars as isize)
+                            - if self.trail_lim.len() == 0 {
+                                self.trail.len() as isize
+                            } else {
+                                self.trail_lim[0] as isize
+                            },
+                        self.clauses.len(),
+                        self.stats.clauses_literals,
+                    );
+                    info!(
+                        " -> learnt lim {:>8} clauses {:>8} lit/cl {:>8}",
+                        self.max_learnts as isize,
+                        self.learnts.len(),
+                        (self.stats.learnts_literals as f64 / self.learnts.len() as f64) as isize
+                    );
                 }
             } else {
                 // no conflict found
@@ -1780,7 +2052,11 @@ impl<Theory : crate::Theory> Solver<Theory> {
                 trace!("simplify ok");
 
                 // reduce the set of learnt clauses
-                trace!("learnts: {}, trail len: {}", self.learnts.len(), self.trail.len());
+                trace!(
+                    "learnts: {}, trail len: {}",
+                    self.learnts.len(),
+                    self.trail.len()
+                );
                 trace!("max learnts: {}", self.max_learnts);
                 if self.learnts.len() as f64 - self.trail.len() as f64 >= self.max_learnts {
                     trace!("reduce_db");
@@ -1903,20 +2179,35 @@ impl<Theory : crate::Theory> Solver<Theory> {
         status
     }
 
-
-    pub fn stats_info(&self, solve_start :cpu_time::ProcessTime) {
-        let duration = cpu_time::ProcessTime::now().duration_since(solve_start).as_millis() as f64 / 1000.0;
+    pub fn stats_info(&self, solve_start: cpu_time::ProcessTime) {
+        let duration = cpu_time::ProcessTime::now()
+            .duration_since(solve_start)
+            .as_millis() as f64
+            / 1000.0;
         info!("* stats:");
-        info!("  - restarts: {}" ,self.stats.starts);
-        info!("  - conflicts: {}  ({:.0} /sec)" ,self.stats.conflicts, self.stats.conflicts as f64 / duration);
-        info!("  - decisions: {}  ({:.2}% random)  ({:.0} /sec)" ,
-        self.stats.decisions, self.stats.rnd_decisions as f64 * 100.0 / self.stats.decisions as f64,
-        self.stats.decisions as f64 / duration);
-        info!("  - propagations: {}  ({:.0} /sec)" ,self.stats.propagations, 
-              self.stats.propagations as f64 / duration);
-        info!("  - conflict literals: {}  ({:.2} % deleted)" ,
-            self.stats.tot_literals, 
-            (self.stats.max_literals as f64 - self.stats.tot_literals as f64)*100.0 / self.stats.max_literals as f64);
+        info!("  - restarts: {}", self.stats.starts);
+        info!(
+            "  - conflicts: {}  ({:.0} /sec)",
+            self.stats.conflicts,
+            self.stats.conflicts as f64 / duration
+        );
+        info!(
+            "  - decisions: {}  ({:.2}% random)  ({:.0} /sec)",
+            self.stats.decisions,
+            self.stats.rnd_decisions as f64 * 100.0 / self.stats.decisions as f64,
+            self.stats.decisions as f64 / duration
+        );
+        info!(
+            "  - propagations: {}  ({:.0} /sec)",
+            self.stats.propagations,
+            self.stats.propagations as f64 / duration
+        );
+        info!(
+            "  - conflict literals: {}  ({:.2} % deleted)",
+            self.stats.tot_literals,
+            (self.stats.max_literals as f64 - self.stats.tot_literals as f64) * 100.0
+                / self.stats.max_literals as f64
+        );
         info!("  - cpu time: {:.2}s", duration);
     }
 }
