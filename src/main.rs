@@ -6,8 +6,9 @@ fn solver_from_dimacs_filename(filename: &str) -> SatSolver {
     let text = std::fs::read_to_string(filename).unwrap();
     let dimacs = dimacs::parse_dimacs(&text).unwrap();
     match dimacs {
-        dimacs::Instance::Cnf { num_vars, clauses } => {
-            trace!("DIMACS NUM VARS {:?}", num_vars);
+        dimacs::Instance::Cnf { clauses, .. } => {
+            //info!("DIMACS NUM VARS {:?}", num_vars);
+            //info!("DIMACS NUM CLAUSES {:?}", clauses.len());
             for c in clauses.iter() {
                 for l in c.lits() {
                     let var = Var(l.var().to_u64() as i32 - 1);

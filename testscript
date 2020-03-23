@@ -1,0 +1,1 @@
+for i in Beijing/*;do echo $i;echo "  minisat";sat1 "$i" >>sat1out 2>&1 ; echo "  mysatsolver";sat2 "$i" >>sat2out  2>&1 ; cmp sat1.log sat2.log && echo "ok"; done

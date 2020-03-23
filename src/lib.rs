@@ -939,11 +939,10 @@ impl<Theory: crate::Theory> Solver<Theory> {
             let add_tmp = &mut self.add_tmp;
             let assigns = &self.assigns;
             add_tmp.retain(|l| {
-                if Self::assigns_lit_value(assigns, *l) == LBOOL_FALSE || *l == prev.inverse() {
+                if Self::assigns_lit_value(assigns, *l) == LBOOL_TRUE || *l == prev.inverse() {
                     already_sat = true;
                 }
-                !(/* dedup */(prev, prev=*l).0 == *l
-                  || /* known */ Self::assigns_lit_value(assigns, *l) == LBOOL_TRUE)
+                (prev, prev=*l).0 != *l && Self::assigns_lit_value(assigns, *l) != LBOOL_FALSE
             });
 
             if already_sat {
@@ -1618,7 +1617,7 @@ impl<Theory: crate::Theory> Solver<Theory> {
     fn get_reason(&mut self, var: Var) -> ClauseHeaderOffset {
         let reason = self.vardata[var.idx()].reason;
         assert!(reason != CLAUSE_THEORY_UNDEF);
-        if reason >= 0 {
+        if reason >= CLAUSE_NONE {
             return reason;
         }
         assert!(reason <= CLAUSE_THEORY_REFERENCE);
@@ -1634,12 +1633,10 @@ impl<Theory: crate::Theory> Solver<Theory> {
         if let RefinementItemMut::Clause(lits) = self.theory_refinement_buffer.get_item_mut(0) {
             Self::sort_theory_lemma(&self.assigns, &self.vardata, lits);
             assert!(lits[0] == lit);
-            let (mut i, mut j) = (0,0);
+            let (mut i, mut j) = (0, 0);
             while i < lits.len() {
-                let keep = 
-                       i == 0 
-                    || lits[i] == lits[j-1]
-                    || self.vardata[lits[i].var().idx()].level == 0;
+                let keep = i == 0
+                    || (lits[i] != lits[j - 1] && self.vardata[lits[i].var().idx()].level != 0);
 
                 if keep {
                     lits[j] = lits[i];
@@ -1916,7 +1913,8 @@ impl<Theory: crate::Theory> Solver<Theory> {
         {
             let mut i = 0;
             while i < self.theory_refinement_buffer.data.len() {
-                if let RefinementItem::Deduced(p,rref) = self.theory_refinement_buffer.get_item(i) {
+                if let RefinementItem::Deduced(p, rref) = self.theory_refinement_buffer.get_item(i)
+                {
                     if self.lit_value(p) == LBOOL_UNDEF {
                         self.unchecked_enqueue(p, CLAUSE_THEORY_REFERENCE - (rref as i32));
                     } else if self.lit_value(p) == LBOOL_FALSE {
