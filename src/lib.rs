@@ -47,6 +47,49 @@ impl Refinement {
         self.data[self.last_clause_idx as usize] += 1;
         self.data.push(lit.0);
     }
+
+    pub fn next_idx(&self, i: usize) -> usize {
+        assert!(self.data[i] >= -1);
+        if self.data[i] == -1 {
+            i + 3
+        } else {
+            i + 1 + self.data[i] as usize
+        }
+    }
+
+    pub fn get_item<'a>(&mut self, i: usize) -> RefinementItem<'a> {
+        if self.data[i] == -1 {
+            RefinementItem::Deduced(Lit(self.data[i + 1]), self.data[i + 2] as u32)
+        } else {
+            let len = self.data[i] as usize;
+            RefinementItem::Clause(unsafe {
+                std::mem::transmute::<&[i32], &[Lit]>(&self.data[(i + 1)..(i + 1 + len)])
+            })
+        }
+    }
+
+    pub fn get_item_mut<'a>(&mut self, i: usize) -> RefinementItemMut<'a> {
+        if self.data[i] == -1 {
+            RefinementItemMut::Deduced(Lit(self.data[i + 1]), self.data[i + 2] as u32)
+        } else {
+            let len = self.data[i] as usize;
+            RefinementItemMut::Clause(unsafe {
+                std::mem::transmute::<&mut [i32], &mut [Lit]>(
+                    &mut self.data[(i + 1)..(i + 1 + len)],
+                )
+            })
+        }
+    }
+}
+
+pub enum RefinementItem<'a> {
+    Deduced(Lit, u32),
+    Clause(&'a [Lit]),
+}
+
+pub enum RefinementItemMut<'a> {
+    Deduced(Lit, u32),
+    Clause(&'a mut [Lit]),
 }
 
 //pub enum Refinement {
@@ -1302,10 +1345,8 @@ impl<Theory: crate::Theory> Solver<Theory> {
                 }
 
                 // Check variable can not be removed for some local reason
-                let local_reason = self.get_reason(l.var()); // TODO why is this call allowed when lits is borrowed?
-                if local_reason == CLAUSE_NONE
-                    || self.seen[l.var().idx()] == Seen::Failed as i8
-                {
+                let local_reason = self.get_reason(l.var());
+                if local_reason == CLAUSE_NONE || self.seen[l.var().idx()] == Seen::Failed as i8 {
                     self.analyze_stack.push(ShrinkStackElem { i: 0, l: p });
                     for elem in self.analyze_stack.iter() {
                         if self.seen[elem.l.var().idx()] == Seen::Undef as i8 {
@@ -1570,12 +1611,53 @@ impl<Theory: crate::Theory> Solver<Theory> {
         self.clause_database.wasted = 0;
     }
 
-    fn has_reason_clause(&self, var :Var) -> bool {
+    fn has_reason_clause(&self, var: Var) -> bool {
         self.vardata[var.idx()].reason >= 0
     }
 
-    fn get_reason(&mut self, var :Var) -> ClauseHeaderOffset {
-        self.vardata[var.idx()].reason
+    fn get_reason(&mut self, var: Var) -> ClauseHeaderOffset {
+        let reason = self.vardata[var.idx()].reason;
+        assert!(reason != CLAUSE_THEORY_UNDEF);
+        if reason >= 0 {
+            return reason;
+        }
+        assert!(reason <= CLAUSE_THEORY_REFERENCE);
+
+        let lit = Lit::new(var, self.var_value(var) != LBOOL_TRUE);
+        // theory reason references are coded as "reason = (-3 - theory_ref)"
+        // recover as "theory_ref = -3 - reason"
+        let rref = (CLAUSE_THEORY_REFERENCE - reason) as u32;
+        self.theory_refinement_buffer.clear();
+        self.theory
+            .explain(lit, rref, &mut self.theory_refinement_buffer);
+
+        if let RefinementItemMut::Clause(lits) = self.theory_refinement_buffer.get_item_mut(0) {
+            Self::sort_theory_lemma(&self.assigns, &self.vardata, lits);
+            assert!(lits[0] == lit);
+            let (mut i, mut j) = (0,0);
+            while i < lits.len() {
+                let keep = 
+                       i == 0 
+                    || lits[i] == lits[j-1]
+                    || self.vardata[lits[i].var().idx()].level == 0;
+
+                if keep {
+                    lits[j] = lits[i];
+                    j += 1;
+                }
+                i += 1;
+            }
+            let shortened_lits = &lits[..j];
+            assert!(shortened_lits.len() > 1);
+            // TODO  fix too short clause
+            let new_cref = self.clause_database.add_clause(shortened_lits, true);
+            self.vardata[var.idx()].reason = new_cref;
+            self.learnts.push(new_cref);
+            self.attach_clause(new_cref);
+            new_cref
+        } else {
+            panic!()
+        }
     }
 
     fn reloc_all_clauses(&mut self, new_data: &mut Vec<u32>) {
@@ -1603,7 +1685,9 @@ impl<Theory: crate::Theory> Solver<Theory> {
         // relocate reasons
         for i in 0..self.trail.len() {
             let var = self.trail[i].var();
-            if !self.has_reason_clause(var) { continue; }
+            if !self.has_reason_clause(var) {
+                continue;
+            }
             let reason = self.get_reason(var);
             if reason != CLAUSE_NONE {
                 let header = self.clause_database.get_header(reason);
@@ -1799,14 +1883,40 @@ impl<Theory: crate::Theory> Solver<Theory> {
         CLAUSE_NONE
     }
 
+    fn sort_theory_lemma(assigns: &Vec<LBool>, vardata: &[VariableData], lits: &mut [Lit]) {
+        lits.sort_by(|x, y| {
+            use std::cmp::Ordering;
+            let x_value = Self::assigns_lit_value(assigns, *x);
+            let y_value = Self::assigns_lit_value(assigns, *y);
+            if x_value == LBOOL_UNDEF && y_value == LBOOL_UNDEF {
+                return x.0.cmp(&y.0);
+            }
+            if x_value == LBOOL_UNDEF {
+                return Ordering::Less;
+            }
+            if y_value == LBOOL_UNDEF {
+                return Ordering::Greater;
+            }
+            if x_value == y_value {
+                return vardata[y.var().idx()]
+                    .level
+                    .cmp(&vardata[x.var().idx()].level);
+            } else {
+                if x_value == LBOOL_TRUE {
+                    return Ordering::Less;
+                } else {
+                    return Ordering::Greater;
+                }
+            }
+        });
+    }
+
     fn theory_refinement(&mut self) -> ClauseHeaderOffset {
         // first pass: push deductions to trail or convert them to conflicts
         {
             let mut i = 0;
             while i < self.theory_refinement_buffer.data.len() {
-                if self.theory_refinement_buffer.data[i] == -1 {
-                    let p = Lit(self.theory_refinement_buffer.data[i + 1]);
-                    let rref = self.theory_refinement_buffer.data[i + 2] as u32;
+                if let RefinementItem::Deduced(p,rref) = self.theory_refinement_buffer.get_item(i) {
                     if self.lit_value(p) == LBOOL_UNDEF {
                         self.unchecked_enqueue(p, CLAUSE_THEORY_REFERENCE - (rref as i32));
                     } else if self.lit_value(p) == LBOOL_FALSE {
@@ -1820,11 +1930,8 @@ impl<Theory: crate::Theory> Solver<Theory> {
                     } else {
                         // lit already set, ignore
                     }
-                    i += 3;
-                } else {
-                    let len = self.theory_refinement_buffer.data[i] as usize;
-                    i += 1 + len;
                 }
+                i = self.theory_refinement_buffer.next_idx(i);
             }
         }
 
@@ -1835,68 +1942,34 @@ impl<Theory: crate::Theory> Solver<Theory> {
         {
             let mut i = 0;
             while i < self.theory_refinement_buffer.data.len() {
-                if self.theory_refinement_buffer.data[i] == -1 {
-                    i += 3;
-                } else {
-                    assert!(self.theory_refinement_buffer.data[i] >= 0);
-                    let len = self.theory_refinement_buffer.data[i] as usize;
-                    let clause_lits =
-                        &mut self.theory_refinement_buffer.data[(i + 1)..(i + 1 + len)];
-                    i += 1 + len;
-
-                    if len == 0 {
+                if let RefinementItemMut::Clause(lits) =
+                    self.theory_refinement_buffer.get_item_mut(i)
+                {
+                    if lits.len() == 0 {
                         backtrack_level = 0;
                         conflict = CLAUSE_THEORY_UNDEF;
                     } else {
-                        let assigns = &self.assigns;
-                        let vardata = &self.vardata;
-                        clause_lits.sort_by(|x, y| {
-                            use std::cmp::Ordering;
-                            let x_value = Self::assigns_lit_value(assigns, Lit(*x));
-                            let y_value = Self::assigns_lit_value(assigns, Lit(*y));
-                            if x_value == LBOOL_UNDEF && y_value == LBOOL_UNDEF {
-                                return x.cmp(y);
-                            }
-                            if x_value == LBOOL_UNDEF {
-                                return Ordering::Less;
-                            }
-                            if y_value == LBOOL_UNDEF {
-                                return Ordering::Greater;
-                            }
-                            if x_value == y_value {
-                                return vardata[Lit(*y).var().idx()]
-                                    .level
-                                    .cmp(&vardata[Lit(*x).var().idx()].level);
-                            } else {
-                                if x_value == LBOOL_TRUE {
-                                    return Ordering::Less;
-                                } else {
-                                    return Ordering::Greater;
-                                }
-                            }
-                        });
+                        Self::sort_theory_lemma(&self.assigns, &self.vardata, lits);
 
-                        if len == 1
-                            || Self::assigns_lit_value(&self.assigns, Lit(clause_lits[1]))
-                                == LBOOL_FALSE
+                        if lits.len() == 1
+                            || Self::assigns_lit_value(&self.assigns, lits[1]) == LBOOL_FALSE
                         {
-                            let level = if len == 1 {
+                            let level = if lits.len() == 1 {
                                 0
                             } else {
-                                self.vardata[Lit(clause_lits[1]).var().idx()].level
+                                self.vardata[lits[1].var().idx()].level
                             };
 
-                            if Self::assigns_lit_value(&self.assigns, Lit(clause_lits[0]))
-                                != LBOOL_TRUE
-                                || self.vardata[Lit(clause_lits[0]).var().idx()].level > level
+                            if Self::assigns_lit_value(&self.assigns, lits[0]) != LBOOL_TRUE
+                                || self.vardata[lits[0].var().idx()].level > level
                             {
                                 backtrack_level = backtrack_level.min(level);
                             }
                         }
                     }
                 }
+                i = self.theory_refinement_buffer.next_idx(i);
             }
-
             self.cancel_until(backtrack_level);
         }
 
@@ -1904,49 +1977,40 @@ impl<Theory: crate::Theory> Solver<Theory> {
         {
             let mut i = 0;
             while i < self.theory_refinement_buffer.data.len() {
-                if self.theory_refinement_buffer.data[i] == -1 {
-                    i += 3;
-                } else {
-                    assert!(self.theory_refinement_buffer.data[i] >= 0);
-                    let len = self.theory_refinement_buffer.data[i] as usize;
-                    let clause_lits =
-                        &self.theory_refinement_buffer.data[(i + 1)..(i + 1 + len)];
-                    i += 1 + len;
-
+                if let RefinementItemMut::Clause(lits) =
+                    self.theory_refinement_buffer.get_item_mut(i)
+                {
                     let mut new_cref = CLAUSE_NONE;
-                    if len > 1 {
+                    if lits.len() > 1 {
                         // attach
-                        new_cref = self.clause_database.add_clause(
-                            unsafe {
-                            std::mem::transmute::<&[i32],&[Lit]>(clause_lits)
-                            }, true);
+                        new_cref = self.clause_database.add_clause(lits, true);
                         self.learnts.push(new_cref);
                         self.attach_clause(new_cref);
                     }
 
-                    let first = Lit(self.theory_refinement_buffer.data[i+2]);
-                    let second = Lit(self.theory_refinement_buffer.data[i+3]);
-                    if conflict == CLAUSE_NONE && Self::assigns_lit_value(&self.assigns, first) != LBOOL_TRUE {
-                        if len == 1
-                            || (Self::assigns_lit_value(&self.assigns, second)
-                                == LBOOL_FALSE && self.vardata[second.var().idx()].level <= backtrack_level) {
-
-                                if Self::assigns_lit_value(&self.assigns, first) == LBOOL_FALSE {
-
-                                    if len > 1 {
-                                        conflict = new_cref;
-                                    } else {
-                                        conflict = CLAUSE_THEORY_UNDEF;
-                                    }
-
+                    let first = lits[0];
+                    let second = lits[1];
+                    if conflict == CLAUSE_NONE
+                        && Self::assigns_lit_value(&self.assigns, first) != LBOOL_TRUE
+                    {
+                        if lits.len() == 1
+                            || (Self::assigns_lit_value(&self.assigns, second) == LBOOL_FALSE
+                                && self.vardata[second.var().idx()].level <= backtrack_level)
+                        {
+                            if Self::assigns_lit_value(&self.assigns, first) == LBOOL_FALSE {
+                                if lits.len() > 1 {
+                                    conflict = new_cref;
                                 } else {
-                                    self.unchecked_enqueue(first, new_cref);
+                                    conflict = CLAUSE_THEORY_UNDEF;
                                 }
+                            } else {
+                                self.unchecked_enqueue(first, new_cref);
+                            }
                         }
                     }
                 }
+                i = self.theory_refinement_buffer.next_idx(i);
             }
-
             conflict
         }
     }
