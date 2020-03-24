@@ -16,3 +16,6 @@ simple_logger = "1.6"
 [profile.release]
 lto = true
 
+[features]
+default = ["trace"]
+trace = []
