@@ -5,6 +5,7 @@ use std::io::Write;
 // theory
 //
 
+#[derive(Debug)]
 #[derive(Copy, Clone)]
 pub enum Check {
     Assert,
@@ -401,6 +402,10 @@ impl OrderHeap {
     //    }
     //}
 
+    pub fn peek(&self) -> Option<Var> { 
+        self.heap.get(0).cloned()
+    }
+
     pub fn remove_min(&mut self, act: &[f64]) -> Var {
         let var = self.heap[0];
         self.heap[0] = self.heap[self.heap.len() - 1];
@@ -615,7 +620,7 @@ impl ClauseDatabase {
 }
 
 pub struct DplltSolver<Th> {
-    theory: Th,
+    pub theory: Th, // TODO how to access?
 
     #[cfg(feature = "trace")]
     pub tracelog_file: Option<std::io::BufWriter<std::fs::File>>,
@@ -748,6 +753,9 @@ impl<Th: Theory> DplltSolver<Th> {
     }
     pub fn num_clauses(&self) -> usize {
         self.clauses.len()
+    }
+    pub fn num_learnts(&self) -> usize {
+        self.learnts.len()
     }
 
     pub fn get_model(&self) -> Option<&[LBool]> {
@@ -1007,7 +1015,7 @@ impl<Th: Theory> DplltSolver<Th> {
             return false;
         } else if self.add_tmp.len() == 1 {
             self.unchecked_enqueue(self.add_tmp[0], CLAUSE_NONE);
-            self.ok = self.propagate_bool() == CLAUSE_NONE;
+            self.ok = self.propagate() == CLAUSE_NONE;
             return self.ok;
         } else {
             let cref = self.clause_database.add_clause(&self.add_tmp, false);
@@ -1183,6 +1191,18 @@ impl<Th: Theory> DplltSolver<Th> {
         }
     }
 
+    fn clean_order_heap(&mut self) {
+        loop {
+            if let Some(v) = self.order_heap.peek() {
+                if self.var_value(v) != LBOOL_UNDEF || self.decision[v.idx()] == 0 {
+                    self.order_heap.remove_min(&self.activity);
+                    continue;
+                }
+            }
+            break;
+        }
+    }
+
     fn pick_branch_lit(&mut self) -> Lit {
         let mut next = VAR_UNDEF;
 
@@ -1200,17 +1220,9 @@ impl<Th: Theory> DplltSolver<Th> {
         }
 
         // activity-based
-        while next == VAR_UNDEF
-            || self.var_value(next) != LBOOL_UNDEF
-            || self.decision[next.0 as usize] == 0
-        {
-            if self.order_heap.is_empty() {
-                next = VAR_UNDEF;
-                break;
-            } else {
-                trace!("order_heap.remove_min {}", self.order_heap.heap[0].0);
-                next = self.order_heap.remove_min(&self.activity);
-            }
+        self.clean_order_heap();
+        if next == VAR_UNDEF && !self.order_heap.is_empty() {
+            next = self.order_heap.remove_min(&self.activity);
         }
 
         // polarity
@@ -1639,6 +1651,7 @@ impl<Th: Theory> DplltSolver<Th> {
             }
             i += 1;
         }
+        //panic!("LOST {} clauses", i-j);
         self.learnts.truncate(j);
         //info!("check garbage from reduce_db");
         self.check_garbage();
@@ -1843,7 +1856,7 @@ impl<Th: Theory> DplltSolver<Th> {
             "simplify called at decisionlevel=0 with trail length={}",
             self.trail.len()
         );
-        if !self.ok || self.propagate_bool() != CLAUSE_NONE {
+        if !self.ok || self.propagate() != CLAUSE_NONE {
             self.ok = false;
             return false;
         }
@@ -1880,9 +1893,15 @@ impl<Th: Theory> DplltSolver<Th> {
 
             let seen = &mut self.seen;
             assert!(self.qhead == self.trail.len());
+            let trail_before = self.trail.len();
             self.trail.retain(|l| seen[l.var().idx()] == 0);
+            assert!(trail_before == self.trail.len());
             self.qhead = self.trail.len();
-            self.theory_qhead = self.qhead; // TODO does this work correctly with theory?
+
+            //self.theory.backtrack(0);
+            //self.theory_qhead = 0;
+
+            assert!(self.released_vars.len() == 0);
             for v in self.released_vars.iter() {
                 self.seen[v.idx()] = 0;
             }
@@ -1916,8 +1935,8 @@ impl<Th: Theory> DplltSolver<Th> {
                 return bool_prop;
             }
             assert!(self.qhead == self.trail.len()); // boolean prop finished without conflict
-
-            let are_all_assigned = self.order_heap.is_empty() && self.qhead == self.trail.len();
+            self.clean_order_heap();
+            let are_all_assigned = self.order_heap.is_empty();
             let check = if are_all_assigned {
                 Check::Final
             } else {
@@ -1926,9 +1945,10 @@ impl<Th: Theory> DplltSolver<Th> {
             let new_lits = &self.trail[self.theory_qhead..self.trail.len()];
             self.theory_qhead = self.trail.len();
             self.theory_refinement_buffer.clear();
-            self.theory
-                .check(check, new_lits, &mut self.theory_refinement_buffer);
+            self.theory.check(check, new_lits, &mut self.theory_refinement_buffer);
+            //println!("vars left before refinement: {}", self.order_heap.heap.len());
             let theory_conflict = self.theory_refinement();
+            //println!("vars left after refinement: {}", self.order_heap.heap.len());
             if theory_conflict != CLAUSE_NONE {
                 return theory_conflict;
             }
@@ -2043,23 +2063,21 @@ impl<Th: Theory> DplltSolver<Th> {
                         self.attach_clause(new_cref);
                     }
 
-                    let first = lits[0];
-                    let second = lits[1];
                     if conflict == CLAUSE_NONE
-                        && Self::assigns_lit_value(&self.assigns, first) != LBOOL_TRUE
+                        && Self::assigns_lit_value(&self.assigns, lits[0]) != LBOOL_TRUE
                     {
                         if lits.len() == 1
-                            || (Self::assigns_lit_value(&self.assigns, second) == LBOOL_FALSE
-                                && self.vardata[second.var().idx()].level <= backtrack_level)
+                            || (Self::assigns_lit_value(&self.assigns, lits[1]) == LBOOL_FALSE
+                                && self.vardata[lits[1].var().idx()].level <= backtrack_level)
                         {
-                            if Self::assigns_lit_value(&self.assigns, first) == LBOOL_FALSE {
+                            if Self::assigns_lit_value(&self.assigns, lits[0]) == LBOOL_FALSE {
                                 if lits.len() > 1 {
                                     conflict = new_cref;
                                 } else {
                                     conflict = CLAUSE_THEORY_UNDEF;
                                 }
                             } else {
-                                self.unchecked_enqueue(first, new_cref);
+                                self.unchecked_enqueue(lits[0], new_cref);
                             }
                         }
                     }
@@ -2078,9 +2096,11 @@ impl<Th: Theory> DplltSolver<Th> {
         self.stats.starts += 1;
 
         loop {
+            //println!("search loop iter: start");
             let conflict_clause = self.propagate();
             //assert!( self.lemmas.len() == 0 ); // ?
             if conflict_clause != CLAUSE_NONE {
+            //println!("search loop iter: conflict");
                 trace!("found conflict");
                 // found conflict
                 self.stats.conflicts += 1;
@@ -2148,6 +2168,7 @@ impl<Th: Theory> DplltSolver<Th> {
                     );
                 }
             } else {
+            //println!("search loop iter: no conflict");
                 // no conflict found
                 trace!("no conflict found");
 
@@ -2159,12 +2180,9 @@ impl<Th: Theory> DplltSolver<Th> {
                 }
 
                 // simplify problem clauses
-                trace!("simplify?");
                 if self.trail_lim.len() == 0 && !self.simplify() {
-                    trace!("simplify failed");
                     return LBOOL_FALSE;
                 }
-                trace!("simplify ok");
 
                 // reduce the set of learnt clauses
                 trace!(
@@ -2199,9 +2217,10 @@ impl<Th: Theory> DplltSolver<Th> {
                 if next == LIT_UNDEF {
                     self.stats.decisions += 1;
                     next = self.pick_branch_lit();
+                    //println!("pick lit {:?} vars left {}", next, self.order_heap.heap.len());
                     trace!("pick branch lit: {:?}", next);
                     if next == LIT_UNDEF {
-                        // model found
+                        // model found and theory consistent
                         return LBOOL_TRUE;
                     }
                 }
@@ -2336,7 +2355,7 @@ fn map_insert<T: Default + Clone>(map: &mut Vec<T>, idx: usize, value: T, defaul
     map[idx as usize] = value;
 }
 
-fn drand(seed: &mut f64) -> f64 {
+pub fn drand(seed: &mut f64) -> f64 {
     let n: f64 = 2147483647.0;
     *seed *= 1389796.0;
     let q = (*seed / n) as i32;
@@ -2344,7 +2363,7 @@ fn drand(seed: &mut f64) -> f64 {
     *seed / n
 }
 
-fn irand(seed: &mut f64, size: i32) -> i32 {
+pub fn irand(seed: &mut f64, size: i32) -> i32 {
     (drand(seed) as i32 * size)
 }
 
@@ -2371,7 +2390,7 @@ pub fn solver_from_dimacs_filename(filename: &str) -> SatSolver {
                 }));
             }
         }
-        _ => {}
+        _ => { panic!("not a cnf file"); }
     }
     s
 }
