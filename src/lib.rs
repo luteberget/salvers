@@ -662,6 +662,7 @@ pub struct DplltSolver<Th> {
     qhead: usize,
     theory_qhead: usize,
     theory_refinement_buffer: Refinement,
+    theory_final_checked: bool,
 
     simp_db_assigns: i32,
     simp_db_props: i64,
@@ -799,6 +800,7 @@ impl<Th: Theory> DplltSolver<Th> {
             qhead: 0,
             theory_qhead: 0,
             theory_refinement_buffer: Refinement::new(),
+            theory_final_checked: false,
             simp_db_assigns: -1,
             simp_db_props: 0,
             //progress_estimate: 0.0,
@@ -1929,13 +1931,14 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     fn propagate(&mut self) -> ClauseHeaderOffset {
-        while self.qhead < self.trail.len() {
+        loop {
+            self.theory_final_checked = false;
             let bool_prop = self.propagate_bool();
             if bool_prop != CLAUSE_NONE {
                 return bool_prop;
             }
             assert!(self.qhead == self.trail.len()); // boolean prop finished without conflict
-            self.clean_order_heap();
+            //self.clean_order_heap();
             let are_all_assigned = self.order_heap.is_empty();
             let check = if are_all_assigned {
                 Check::Final
@@ -1951,7 +1954,15 @@ impl<Th: Theory> DplltSolver<Th> {
             //println!("vars left after refinement: {}", self.order_heap.heap.len());
             if theory_conflict != CLAUSE_NONE {
                 return theory_conflict;
+            } else if are_all_assigned {
+                // We could avoid this flag by just calling clean_order_heap and using the actual
+                // remaining vars to know if we need a final check or not.  But if we modify the
+                // order heap here, we break minisat trace compatibility, so we do some more
+                // complicated flagging instead.
+                self.theory_final_checked = true;
             }
+
+            if !(self.qhead < self.trail.len()) { break; }
         }
 
         CLAUSE_NONE
@@ -2220,6 +2231,10 @@ impl<Th: Theory> DplltSolver<Th> {
                     //println!("pick lit {:?} vars left {}", next, self.order_heap.heap.len());
                     trace!("pick branch lit: {:?}", next);
                     if next == LIT_UNDEF {
+                        if !self.theory_final_checked {
+                            // back to propagate for a final theory consistency check.
+                            continue;
+                        }
                         // model found and theory consistent
                         return LBOOL_TRUE;
                     }
@@ -2262,6 +2277,7 @@ impl<Th: Theory> DplltSolver<Th> {
         debug!("-> SOLVE");
         self.model.clear();
         self.conflict.clear();
+        self.theory_final_checked = false;
         if !self.ok {
             trace!("solve: already unsat");
             return LBOOL_FALSE;
