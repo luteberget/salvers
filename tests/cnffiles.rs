@@ -45,7 +45,211 @@ fn verify_model<T: mysatsolver::Theory>(solver: &mut mysatsolver::DplltSolver<T>
 }
 
 #[test]
-fn hidden_clauses_using_theory() {
+fn hidden_clause_propagated_using_theory() {
+    use mysatsolver::*;
+    use std::collections::HashSet;
+    #[derive(Default)]
+    struct HiddenClauseTheory {
+        clauses: Vec<Vec<Lit>>,
+        trail: Vec<Lit>,
+        trail_lim: Vec<usize>,
+        lits :HashSet<i32>,
+        print: bool,
+        propagate_on_conflict: bool,
+    }
+
+    impl Theory for HiddenClauseTheory {
+        fn check(&mut self, check :Check, lits :&[Lit], r :&mut Refinement) {
+            println!("Check {:?}", check);
+            for l in lits {
+                self.trail.push(*l);
+                self.lits.insert(l.0);
+                // for every assigned lit, check every clause.
+                for (rref, c) in self.clauses.iter().enumerate() {
+                    let unsat = c.iter().filter(|l| self.lits.contains(&l.inverse().0)).nth(0);
+                    if let Some(unsat_lit) = unsat {
+                        // need to add either a conflicting assignment by propagation...
+                        if self.propagate_on_conflict {
+                            r.add_deduced(unsat_lit.inverse(), rref as u32);
+                        } else {
+                            // ... or just give the clause directly
+                            r.add_clause(c.iter().cloned());
+                        }
+                    } else {
+                        let mut unassigned_lits = c.iter().filter(|l| !self.lits.contains(&l.0));
+                        let l1 = unassigned_lits.next();
+                        let l2 = unassigned_lits.next();
+                        if let (Some(l),None) = (l1,l2) {
+                            // There is exactly one lit in the clause which is not violated, so it
+                            // must become true. The lits array argument could already contain this
+                            // lit or its inverse, but the main solver should handle that.
+                            r.add_deduced(*l, rref as u32); } }
+                }
+            }
+        }
+
+        fn explain(&mut self, _l: Lit, rref: u32, r: &mut Refinement) {
+            r.add_clause(self.clauses[rref as usize].iter().cloned());
+        }
+
+        fn new_decision_level(&mut self) { 
+            self.trail_lim.push(self.trail.len());
+        }
+
+        fn backtrack(&mut self, level: i32) {
+            if self.trail_lim.len() > level as usize {
+                self.trail.truncate(self.trail_lim[level as usize]);
+                self.trail_lim.truncate(level as usize);
+                self.lits = self.trail.iter().map(|l| l.0).collect();
+            }
+        }
+    }
+
+    for hidden_ratio in [0.0, 0.01, 0.3].iter().cloned() {
+        for propagate_on_conflict in [false, true].iter().cloned() {
+            let external_solver_path = std::path::PathBuf::from(env!("SATSOLVER"));
+            let mut rnd_seed_var = 0.5;
+            let rnd_seed = &mut rnd_seed_var;
+            for_each_cnf_filename(move |filename| {
+                if filename.contains("add") {
+                    return;
+                } // the "add" files are very slow with hidden clauses.
+                println!("CASE hidden={}, propagate_on_conflict={}", hidden_ratio, propagate_on_conflict);
+                let mut solver: DplltSolver<HiddenClauseTheory> =
+                    DplltSolver::new(Default::default());
+                solver.theory.propagate_on_conflict = propagate_on_conflict;
+                let text = std::fs::read_to_string(filename).unwrap();
+                let dimacs = dimacs::parse_dimacs(&text).unwrap();
+                let mut all_clauses = Vec::new();
+                match dimacs {
+                    dimacs::Instance::Cnf { clauses, .. } => {
+                        for c in clauses.iter() {
+                            // add the vars
+                            for l in c.lits() {
+                                let var = Var(l.var().to_u64() as i32 - 1);
+                                while solver.num_vars() <= var.0 as usize {
+                                    solver.new_var(mysatsolver::LBOOL_UNDEF, true);
+                                }
+                            }
+
+                            let lits = c.lits().iter().map(|l| {
+                                Lit::new(
+                                    Var(l.var().to_u64() as i32 - 1),
+                                    l.sign() == dimacs::Sign::Neg,
+                                )
+                            });
+
+                            let rnd = mysatsolver::drand(rnd_seed);
+                            let lits = lits.collect::<Vec<_>>();
+                            if rnd < hidden_ratio {
+                                // add to hidden clauses
+                                solver.theory.clauses.push(lits.clone());
+                            } else {
+                                // add normally
+                                solver.add_clause(lits.iter().cloned());
+                            }
+                            all_clauses.push(lits.clone());
+                        }
+                    }
+                    _ => panic!(),
+                }
+
+                let (in_clauses, out_clauses) = (
+                    solver.num_clauses() + solver.num_learnts(),
+                    solver.theory.clauses.len(),
+                );
+                solver.theory.print = true;
+                let r = solver.solve();
+                solver.theory.print = false;
+                println!("  solve finished = {:?}.", r.as_bool());
+
+                // verify internal model
+                assert!(verify_model(&mut solver));
+                println!(
+                    "  before: {} regular clauses, {} hidden clauses",
+                    in_clauses, out_clauses
+                );
+                let (in_clauses, out_clauses) = (
+                    solver.num_clauses() + solver.num_learnts(),
+                    solver.theory.clauses.len(),
+                );
+                println!(
+                    "  after: {} regular clauses, {} hidden clauses",
+                    in_clauses, out_clauses
+                );
+
+                // verify model against hidden clauses
+                //
+                if solver.solve().as_bool().unwrap() {
+                    let model = solver
+                        .get_model()
+                        .unwrap()
+                        .iter()
+                        .map(|l| l.as_bool().unwrap())
+                        .collect::<Vec<bool>>();
+                    for c in solver.theory.clauses.iter() {
+                        if !c.iter().any(|l| {
+                            if l.sign() {
+                                !model[l.var().idx()]
+                            } else {
+                                model[l.var().idx()]
+                            }
+                        }) {
+                            println!("clause not sat: {:?}", c);
+                            assert!(false);
+                        }
+                    }
+                    println!(
+                        "  ok -- checked {} HIDDEN clauses against {} variables",
+                        solver.theory.clauses.len(),
+                        solver.get_model().unwrap().len()
+                    );
+                    // TODO check clauses directly from original dimacs
+                }
+                //
+                // verify model against ALL clauses
+                //
+                if solver.solve().as_bool().unwrap() {
+                    let model = solver
+                        .get_model()
+                        .unwrap()
+                        .iter()
+                        .map(|l| l.as_bool().unwrap())
+                        .collect::<Vec<bool>>();
+                    for c in all_clauses.iter() {
+                        if !c.iter().any(|l| {
+                            if l.sign() {
+                                !model[l.var().idx()]
+                            } else {
+                                model[l.var().idx()]
+                            }
+                        }) {
+                            println!("clause not sat: {:?}", c);
+                            assert!(false);
+                        }
+                    }
+                    println!(
+                        "  ok -- checked {} HIDDEN clauses against {} variables",
+                        all_clauses.len(),
+                        solver.get_model().unwrap().len()
+                    );
+                    // TODO check clauses directly from original dimacs
+                }
+
+                // verify sat/unsat with external solver
+                assert!(verify_external_solver(
+                    &mut solver,
+                    &external_solver_path,
+                    filename
+                ));
+            });
+        }
+    }
+
+}
+
+#[test]
+fn hidden_clauses_added_using_theory() {
     use mysatsolver::*;
     #[derive(Default)]
     struct HiddenClauseTheory {

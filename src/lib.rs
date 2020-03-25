@@ -95,11 +95,13 @@ impl Refinement {
     }
 }
 
+#[derive(Debug)]
 pub enum RefinementItem<'a> {
     Deduced(Lit, u32),
     Clause(&'a [Lit]),
 }
 
+#[derive(Debug)]
 pub enum RefinementItemMut<'a> {
     Deduced(Lit, u32),
     Clause(&'a mut [Lit]),
@@ -1017,7 +1019,9 @@ impl<Th: Theory> DplltSolver<Th> {
             return false;
         } else if self.add_tmp.len() == 1 {
             self.unchecked_enqueue(self.add_tmp[0], CLAUSE_NONE);
+            println!("addprop1");
             self.ok = self.propagate() == CLAUSE_NONE;
+            println!("addprop2 ok={}",self.ok);
             return self.ok;
         } else {
             let cref = self.clause_database.add_clause(&self.add_tmp, false);
@@ -1696,6 +1700,7 @@ impl<Th: Theory> DplltSolver<Th> {
         self.theory_refinement_buffer.clear();
         self.theory
             .explain(lit, rref, &mut self.theory_refinement_buffer);
+        println!("  ** theory-explain {:?}", self.theory_refinement_buffer.get_item_mut(0));
 
         if let RefinementItemMut::Clause(lits) = self.theory_refinement_buffer.get_item_mut(0) {
             Self::sort_theory_lemma(&self.assigns, &self.vardata, lits);
@@ -1712,8 +1717,8 @@ impl<Th: Theory> DplltSolver<Th> {
                 i += 1;
             }
             let shortened_lits = &lits[..j];
-            assert!(shortened_lits.len() > 1);
-            // TODO  fix too short clause
+            assert!(shortened_lits.len() > 1); 
+            // TODO  fix too short clause by adding a "global true lit" in solver constructor.
             let new_cref = self.clause_database.add_clause(shortened_lits, true);
             self.vardata[var.idx()].reason = new_cref;
             self.learnts.push(new_cref);
@@ -1858,10 +1863,12 @@ impl<Th: Theory> DplltSolver<Th> {
             "simplify called at decisionlevel=0 with trail length={}",
             self.trail.len()
         );
+        println!(" simplify1");
         if !self.ok || self.propagate() != CLAUSE_NONE {
             self.ok = false;
             return false;
         }
+        println!(" simplify2");
 
         if (self.trail.len() as i32) == self.simp_db_assigns || self.simp_db_props > 0 {
             return true;
@@ -1946,6 +1953,7 @@ impl<Th: Theory> DplltSolver<Th> {
                 Check::Propagate
             };
             let new_lits = &self.trail[self.theory_qhead..self.trail.len()];
+            println!("propagating {:?}", new_lits);
             self.theory_qhead = self.trail.len();
             self.theory_refinement_buffer.clear();
             self.theory.check(check, new_lits, &mut self.theory_refinement_buffer);
@@ -1997,6 +2005,7 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     fn theory_refinement(&mut self) -> ClauseHeaderOffset {
+        let mut output = false;
         // first pass: push deductions to trail or convert them to conflicts
         {
             let mut i = 0;
@@ -2004,7 +2013,10 @@ impl<Th: Theory> DplltSolver<Th> {
                 if let RefinementItem::Deduced(p, rref) = self.theory_refinement_buffer.get_item(i)
                 {
                     if self.lit_value(p) == LBOOL_UNDEF {
-                        self.unchecked_enqueue(p, CLAUSE_THEORY_REFERENCE - (rref as i32));
+                        let reason = CLAUSE_THEORY_REFERENCE - (rref as i32);
+                        self.unchecked_enqueue(p, reason);
+                        output = true;
+                        println!("  ** th-prop-normal {:?} {:?} {:?} ", p, rref, reason);
                     } else if self.lit_value(p) == LBOOL_FALSE {
                         let pre_len = self.theory_refinement_buffer.data.len();
                         self.theory
@@ -2013,7 +2025,9 @@ impl<Th: Theory> DplltSolver<Th> {
                             self.theory_refinement_buffer.data.len() > pre_len
                                 && self.theory_refinement_buffer.data[pre_len] != -1
                         ); // must have added a clause
+                        println!("  ** th-prop-conflict {:?}", self.theory_refinement_buffer.get_item(pre_len));
                     } else {
+                        println!("  ** th-prop-already-set");
                         // lit already set, ignore
                     }
                 }
@@ -2095,6 +2109,8 @@ impl<Th: Theory> DplltSolver<Th> {
                 }
                 i = self.theory_refinement_buffer.next_idx(i);
             }
+
+            if output { println!("  refine: confl {:?}", conflict); }
             conflict
         }
     }
@@ -2179,7 +2195,8 @@ impl<Th: Theory> DplltSolver<Th> {
                     );
                 }
             } else {
-            //println!("search loop iter: no conflict");
+
+            println!("search loop iter: no conflict");
                 // no conflict found
                 trace!("no conflict found");
 
