@@ -1014,14 +1014,16 @@ impl<Th: Theory> DplltSolver<Th> {
             }
         }
 
+        //println!("add_clause({:?})", self.add_tmp);
         if self.add_tmp.len() == 0 {
             self.ok = false;
             return false;
         } else if self.add_tmp.len() == 1 {
             self.unchecked_enqueue(self.add_tmp[0], CLAUSE_NONE);
-            println!("addprop1");
-            self.ok = self.propagate() == CLAUSE_NONE;
-            println!("addprop2 ok={}",self.ok);
+            //println!("addprop1 ok={}",self.ok);
+            let confl = self.propagate();
+            //println!("addprop2 confl={}",confl);
+            self.ok = confl == CLAUSE_NONE;
             return self.ok;
         } else {
             let cref = self.clause_database.add_clause(&self.add_tmp, false);
@@ -1489,6 +1491,7 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     fn unchecked_enqueue(&mut self, lit: Lit, reason: ClauseHeaderOffset) {
+        //println!(" (-) ${:?}", lit);
         trace!("assign {}", lit.0);
         assert!(self.lit_value(lit) == LBOOL_UNDEF);
         self.assigns[lit.var().0 as usize] = LBool::from_bool(lit.sign());
@@ -1589,6 +1592,7 @@ impl<Th: Theory> DplltSolver<Th> {
                         "learnt   clause idx {:?}",
                         self.learnts.iter().position(|i| *i == cref)
                     );
+                    //println!("Conflict in {:?}", self.clause_database.get_clause(cref));
                     conflict_clause = cref;
                     self.qhead = self.trail.len();
                     while i < self.watch_occs[p.0 as usize].len() {
@@ -1700,7 +1704,7 @@ impl<Th: Theory> DplltSolver<Th> {
         self.theory_refinement_buffer.clear();
         self.theory
             .explain(lit, rref, &mut self.theory_refinement_buffer);
-        println!("  ** theory-explain {:?}", self.theory_refinement_buffer.get_item_mut(0));
+        //println!("  ** theory-explain {:?}", self.theory_refinement_buffer.get_item_mut(0));
 
         if let RefinementItemMut::Clause(lits) = self.theory_refinement_buffer.get_item_mut(0) {
             Self::sort_theory_lemma(&self.assigns, &self.vardata, lits);
@@ -1716,16 +1720,27 @@ impl<Th: Theory> DplltSolver<Th> {
                 }
                 i += 1;
             }
-            let shortened_lits = &lits[..j];
-            assert!(shortened_lits.len() > 1); 
+            self.add_tmp.clear();
+            self.add_tmp.extend(&lits[..j]);
+            assert!(self.add_tmp.len() > 0);
+            if self.add_tmp.len() == 1 {
+                // We must have at least two literals to add a clause. Add something to the clause
+                // that is unlikely to become true. If it should become true anyway, the refinement
+                // will happen again.
+                if let Some(l) = self.trail.iter().filter(|x| x.var() != self.add_tmp[0].var()).next() {
+                    self.add_tmp.push(l.inverse()); 
+                } 
+                println!("ADD TMP HACK {:?}", self.add_tmp);
+            }
+            assert!(self.add_tmp.len() > 1); 
             // TODO  fix too short clause by adding a "global true lit" in solver constructor.
-            let new_cref = self.clause_database.add_clause(shortened_lits, true);
+            let new_cref = self.clause_database.add_clause(&self.add_tmp, true);
             self.vardata[var.idx()].reason = new_cref;
             self.learnts.push(new_cref);
             self.attach_clause(new_cref);
             new_cref
         } else {
-            panic!()
+            panic!("Theory handler did not explain its deduction.");
         }
     }
 
@@ -1863,12 +1878,13 @@ impl<Th: Theory> DplltSolver<Th> {
             "simplify called at decisionlevel=0 with trail length={}",
             self.trail.len()
         );
-        println!(" simplify1");
+        //println!(" simplify1");
         if !self.ok || self.propagate() != CLAUSE_NONE {
+            //println!("SIMPLIFTY SET OK=FALSE");
             self.ok = false;
             return false;
         }
-        println!(" simplify2");
+        //println!(" simplify2");
 
         if (self.trail.len() as i32) == self.simp_db_assigns || self.simp_db_props > 0 {
             return true;
@@ -1953,7 +1969,7 @@ impl<Th: Theory> DplltSolver<Th> {
                 Check::Propagate
             };
             let new_lits = &self.trail[self.theory_qhead..self.trail.len()];
-            println!("propagating {:?}", new_lits);
+            //println!("propagating {:?}", new_lits);
             self.theory_qhead = self.trail.len();
             self.theory_refinement_buffer.clear();
             self.theory.check(check, new_lits, &mut self.theory_refinement_buffer);
@@ -2005,7 +2021,7 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     fn theory_refinement(&mut self) -> ClauseHeaderOffset {
-        let mut output = false;
+        //let mut output = false;
         // first pass: push deductions to trail or convert them to conflicts
         {
             let mut i = 0;
@@ -2015,8 +2031,8 @@ impl<Th: Theory> DplltSolver<Th> {
                     if self.lit_value(p) == LBOOL_UNDEF {
                         let reason = CLAUSE_THEORY_REFERENCE - (rref as i32);
                         self.unchecked_enqueue(p, reason);
-                        output = true;
-                        println!("  ** th-prop-normal {:?} {:?} {:?} ", p, rref, reason);
+                        //output = true;
+                        //println!("  ** th-prop-normal {:?} {:?} {:?} ", p, rref, reason);
                     } else if self.lit_value(p) == LBOOL_FALSE {
                         let pre_len = self.theory_refinement_buffer.data.len();
                         self.theory
@@ -2025,9 +2041,9 @@ impl<Th: Theory> DplltSolver<Th> {
                             self.theory_refinement_buffer.data.len() > pre_len
                                 && self.theory_refinement_buffer.data[pre_len] != -1
                         ); // must have added a clause
-                        println!("  ** th-prop-conflict {:?}", self.theory_refinement_buffer.get_item(pre_len));
+                        //println!("  ** th-prop-conflict {:?}", self.theory_refinement_buffer.get_item(pre_len));
                     } else {
-                        println!("  ** th-prop-already-set");
+                        //println!("  ** th-prop-already-set");
                         // lit already set, ignore
                     }
                 }
@@ -2110,7 +2126,7 @@ impl<Th: Theory> DplltSolver<Th> {
                 i = self.theory_refinement_buffer.next_idx(i);
             }
 
-            if output { println!("  refine: confl {:?}", conflict); }
+            //if output { println!("  refine: confl {:?}", conflict); }
             conflict
         }
     }
@@ -2196,7 +2212,7 @@ impl<Th: Theory> DplltSolver<Th> {
                 }
             } else {
 
-            println!("search loop iter: no conflict");
+            //println!("search loop iter: no conflict");
                 // no conflict found
                 trace!("no conflict found");
 
@@ -2338,6 +2354,7 @@ impl<Th: Theory> DplltSolver<Th> {
                 self.model[v.idx()] = self.var_value(v);
             }
         } else if status == LBOOL_FALSE && self.conflict.len() == 0 {
+            //println!("SEARCH -> STATUS FALSE");
             self.ok = false;
         }
 
