@@ -49,14 +49,14 @@ impl Refinement {
         self.data.push(lit.0);
     }
 
-    pub fn add_clause_lits(&mut self, lits: impl Iterator<Item = Lit>) {
+    pub fn add_clause_lits(&mut self, lits: impl IntoIterator<Item = Lit>) {
         assert!(self.last_clause_idx >= 0 && self.last_clause_idx < self.data.len() as i32);
         let len0 = self.data.len();
         self.data.extend(lits.into_iter().map(|l| l.0));
         self.data[self.last_clause_idx as usize] += (self.data.len() - len0) as i32;
     }
 
-    pub fn add_clause(&mut self, lits :impl Iterator<Item = Lit>) {
+    pub fn add_clause(&mut self, lits :impl IntoIterator<Item = Lit>) {
         self.new_clause();
         self.add_clause_lits(lits);
     }
@@ -901,7 +901,7 @@ impl<Th: Theory> DplltSolver<Th> {
         self.set_decision_var(var, decision_var);
         // trail.capacity(v+1) // not needed?
 
-        Lit(var.0) // TODO
+        Lit::new(var, false)
     }
 
     fn set_decision_var(&mut self, var: Var, b: bool) {
@@ -986,7 +986,7 @@ impl<Th: Theory> DplltSolver<Th> {
         LBool::xor(&assigns[lit.var().0 as usize], lit.sign())
     }
 
-    pub fn add_clause(&mut self, ps: impl Iterator<Item = Lit>) -> bool {
+    pub fn add_clause(&mut self, ps: impl IntoIterator<Item = Lit>) -> bool {
         // Add "original" clause, cannot be directly used
         // during search because of simplification.
         assert!(self.trail_lim.len() == 0);
@@ -1463,15 +1463,15 @@ impl<Th: Theory> DplltSolver<Th> {
 
         self.seen[p.var().idx()] = 1;
 
-        let mut i: usize = self.trail.len() - 1;
-        while i >= self.trail_lim[0] as usize {
-            let var = self.trail[i].var();
+        let mut i: isize = self.trail.len() as isize - 1;
+        while i >= self.trail_lim[0] as isize {
+            let var = self.trail[i as usize].var();
             if self.seen[var.idx()] > 0 {
                 //let reason = self.vardata[var.idx()].reason;
                 let reason = self.get_reason(var);
                 if reason == CLAUSE_NONE {
                     assert!(self.vardata[var.idx()].level > 0);
-                    self.conflict.push(self.trail[i].inverse());
+                    self.conflict.push(self.trail[i as usize].inverse());
                 } else {
                     let header = self.clause_database.get_header(reason);
                     let lits = self
@@ -2304,6 +2304,11 @@ impl<Th: Theory> DplltSolver<Th> {
         }
 
         return y.powf(seq as f64);
+    }
+
+    pub fn set_assumptions(&mut self, a :impl IntoIterator<Item = Lit>) {
+        self.assumptions.clear();
+        self.assumptions.extend(a);
     }
 
     pub fn solve(&mut self) -> LBool {
