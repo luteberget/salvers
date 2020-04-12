@@ -7,6 +7,7 @@ use std::collections::VecDeque;
 /// Integer variable for use in difference constraints (see `IdlSolver`).
 pub struct DVar(u32);
 
+#[derive(Debug)]
 struct InnerIdl {
     next_dvar: u32,
     conditions: HashMap<Lit, u32>, // lit ->  edge idx
@@ -16,6 +17,7 @@ struct InnerIdl {
     trail_lim :Vec<usize>,
 }
 
+#[derive(Debug)]
 struct IdlGraph {
     conflict: Vec<Lit>,
     nodes: Vec<IdlNode>,
@@ -25,12 +27,14 @@ struct IdlGraph {
     queue: VecDeque<i32>,
 }
 
+#[derive(Debug)]
 struct IdlNode {
     dist: i32,
     pred: i32,
     out_edges: SmallVec<[u32; 4]>,
 }
 
+#[derive(Debug)]
 struct IdlEdge {
     from: i32, // negative sign means not enabled
     to: u32,
@@ -95,6 +99,7 @@ impl IdlGraph {
                 self.update_dists.push((edge.to, y.dist));
                 self.nodes[edge.to as usize].dist = x.dist + edge.weight;
                 self.nodes[edge.to as usize].pred = edge_idx;
+                //println!("new {:?}", self.nodes.iter().map(|n| n.dist));
                 for other in self.nodes[edge.to as usize].out_edges.iter() {
                     self.queue.push_back(*other as i32);
                 }
@@ -105,7 +110,13 @@ impl IdlGraph {
     }
 
     fn analyze_conflict(&mut self, add_id: u32) {
+        //println!("analyze {}: {:#?}", add_id, self);
         self.conflict.clear();
+            let add_lit = self.edges[add_id as usize].lit;
+            if add_lit != LIT_UNDEF {
+                self.conflict.push(add_lit);
+            }
+        
         let mut edge_id = self.nodes[self.edges[add_id as usize].from as usize].pred;
         while edge_id != add_id as i32 {
             let lit = self.edges[edge_id as usize].lit;
@@ -179,11 +190,13 @@ impl Theory for InnerIdl {
     fn check(&mut self, _ch: Check, lits: &[Lit], buf: &mut Refinement) {
         assert!(!self.requires_backtrack);
         //println!("check {:?} {:?}", _ch, lits);
+        //if let Check::Final = _ch { println!("final trail {:?}\nndoes: {:#?}", self.trail,self.graph.nodes); }
+        //println!("before: {:#?}", self);
         for lit in lits {
             if let Some(edge_idx) = self.conditions.get(lit) {
                 //println!("enabling conditional {:?}->{}", lit, edge_idx);
                 if !self.graph.enable_edge(*edge_idx) {
-                    println!("Adding  {:?}", self.graph.conflict);
+                    //println!("Adding  {:?}", self.graph.conflict);
                     buf.add_clause(self.graph.conflict.iter().map(|l| l.inverse()));
                     self.requires_backtrack = true;
                     return;
@@ -284,6 +297,7 @@ impl IdlSolver {
     }
 
     pub fn solve(&mut self) -> bool {
+        self.prop.set_assumptions(std::iter::empty());
         self.prop.solve() == LBOOL_TRUE
     }
 

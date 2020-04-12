@@ -3,16 +3,28 @@ use itertools::Itertools;
 
 #[test]
 pub fn jobshop1() {
-      // makespan 28
-      let s1 = vec![vec![13, 3], vec![2, 5], vec![1, 3], vec![4, 6], vec![5, 7]];
-      
-      // makespan 21
-      let s2 = vec![ vec![4,3], vec![1,2], vec![5,4], vec![2,3], vec![5,6], ];
+    // makespan 9
+    let sa = vec![vec![9]];
 
-    //assert_eq!(jobshop(s1).unwrap(), 28);
-    assert_eq!(jobshop(s2).unwrap(), 21);
+    // makespan 19
+    let sb = vec![vec![9],vec![10]];
 
-    fn jobshop(job_times :Vec<Vec<u32>>) -> Option<u32> {
+    // makespan 6
+    let s1 = vec![vec![2,2],vec![2,2]];
+
+    // makespan 28
+    let s2 = vec![vec![13, 3], vec![2, 5], vec![1, 3], vec![4, 6], vec![5, 7]];
+
+    // makespan 21
+    let s3 = vec![vec![4, 3], vec![1, 2], vec![5, 4], vec![2, 3], vec![5, 6]];
+
+    assert_eq!(jobshop(sa).unwrap(), 9);
+    assert_eq!(jobshop(sb).unwrap(), 19);
+    assert_eq!(jobshop(s1).unwrap(), 6);
+    assert_eq!(jobshop(s2).unwrap(), 28);
+    assert_eq!(jobshop(s3).unwrap(), 21);
+
+    fn jobshop(job_times: Vec<Vec<u32>>) -> Option<u32> {
         let mut s = idl::IdlSolver::new();
         // process 5 jobs, each first on machine 1, then on machine 2.
 
@@ -71,7 +83,7 @@ pub fn jobshop1() {
         }
 
         if !s.solve() {
-	 panic!();
+            panic!();
         }
         let mut lo = 0;
         let mut best = None;
@@ -87,14 +99,14 @@ pub fn jobshop1() {
                 hi = mid;
             } else {
                 println!("mid={} failed", mid);
-                lo = mid+1;
+                lo = mid + 1;
             }
             if hi <= lo {
                 println!("done {} {} {}", lo, mid, hi);
                 break (x, lo);
             }
         };
-        //if let Some(b) = best { s.add_clause(&vec![b]); }
+        s.add_diff(None, max_time, s.zero(), val); // max_time <= 5   --> max_time >= 5
 
         if s.solve() {
             println!("SAT");
@@ -109,7 +121,7 @@ pub fn jobshop1() {
                             s.push('_' as u8);
                         }
                     }
-                    for c in &mut output[machine_idx][t1 as usize .. t2 as usize] {
+                    for c in &mut output[machine_idx][t1 as usize..t2 as usize] {
                         *c = std::char::from_digit(job_idx as u32, 10).unwrap() as u8;
                     }
                 }
