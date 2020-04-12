@@ -159,7 +159,7 @@ impl Var {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Lit(pub i32);
 
 impl Lit {
@@ -838,6 +838,8 @@ impl<Th: Theory> DplltSolver<Th> {
             stats: Default::default(),
         }
     }
+
+   pub fn new_var_default(&mut self) -> Lit { self.new_var(LBOOL_UNDEF, true) }
 
     pub fn new_var(&mut self, user_polarity: LBool, decision_var: bool) -> Lit {
         let var = if let Some(var) = self.free_vars.pop() {
