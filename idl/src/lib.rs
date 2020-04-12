@@ -40,6 +40,7 @@ struct IdlEdge {
 
 impl IdlGraph {
     fn disable_edge(&mut self, del_id :u32) -> bool {
+      //println!("disable {}", del_id);
       let edge = &mut self.edges[del_id as usize];
       if edge.from < 0 { return false; }
       edge.from *= -1;
@@ -177,28 +178,38 @@ impl InnerIdl {
 impl Theory for InnerIdl {
     fn check(&mut self, _ch: Check, lits: &[Lit], buf: &mut Refinement) {
         assert!(!self.requires_backtrack);
-        println!("check {:?} {:?}", _ch, lits);
+        //println!("check {:?} {:?}", _ch, lits);
         for lit in lits {
-            for edge_idx in self.conditions.get(lit) {
+            if let Some(edge_idx) = self.conditions.get(lit) {
+                //println!("enabling conditional {:?}->{}", lit, edge_idx);
                 if !self.graph.enable_edge(*edge_idx) {
-                    buf.add_clause(self.graph.conflict.iter().cloned());
+                    println!("Adding  {:?}", self.graph.conflict);
+                    buf.add_clause(self.graph.conflict.iter().map(|l| l.inverse()));
                     self.requires_backtrack = true;
                     return;
                 }
+                self.trail.push(*edge_idx);
+            } else {
+                //println!("irrelevant lit {:?}", lit);
             }
         }
     }
+
     fn explain(&mut self, _l: Lit, _x: u32, _buf: &mut Refinement) {
         unreachable!()
     }
 
     fn new_decision_level(&mut self) {
       self.trail_lim.push(self.trail.len());
+      //println!("new theory decision level {}", self.trail_lim.len());
+      //println!("trail: {:?}", self.trail);
+      //println!("trail_lim: {:?}", self.trail_lim);
     }
 
     fn backtrack(&mut self, level: i32) {
-        self.requires_backtrack = false;
         if (level as usize) < self.trail_lim.len() {
+          self.requires_backtrack = false;
+          //println!("backtracking to i={}",self.trail_lim[level as usize]);
           for edge in self.trail.drain(self.trail_lim[level as usize]..) {
             self.graph.disable_edge(edge);
           }
@@ -273,6 +284,11 @@ impl IdlSolver {
     }
 
     pub fn solve(&mut self) -> bool {
+        self.prop.solve() == LBOOL_TRUE
+    }
+
+    pub fn solve_with_assumptions(&mut self, a :&[Lit]) -> bool {
+        self.prop.set_assumptions(a.iter().cloned());
         self.prop.solve() == LBOOL_TRUE
     }
 

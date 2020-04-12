@@ -9,3 +9,6 @@ edition = "2018"
 [dependencies]
 mysatsolver = { path = ".." }
 smallvec = "1.3"
+
+[dev-dependencies]
+itertools = "0.9"
