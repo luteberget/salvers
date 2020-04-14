@@ -11,10 +11,13 @@ pub struct DVar(u32);
 struct InnerIdl {
     next_dvar: u32,
     conditions: HashMap<Lit, u32>, // lit ->  edge idx
+
+    #[cfg(debug_assertions)]
     requires_backtrack: bool,
+
     graph: IdlGraph,
-    trail :Vec<u32>, // trail of activated edges
-    trail_lim :Vec<usize>,
+    trail: Vec<u32>, // trail of activated edges
+    trail_lim: Vec<usize>,
 }
 
 #[derive(Debug)]
@@ -43,12 +46,14 @@ struct IdlEdge {
 }
 
 impl IdlGraph {
-    fn disable_edge(&mut self, del_id :u32) -> bool {
-      //println!("disable {}", del_id);
-      let edge = &mut self.edges[del_id as usize];
-      if edge.from < 0 { return false; }
-      edge.from *= -1;
-      true
+    fn disable_edge(&mut self, del_id: u32) -> bool {
+        //println!("disable {}", del_id);
+        let edge = &mut self.edges[del_id as usize];
+        if edge.from < 0 {
+            return false;
+        }
+        edge.from *= -1;
+        true
     }
 
     fn enable_edge(&mut self, add_id: u32) -> bool {
@@ -112,11 +117,11 @@ impl IdlGraph {
     fn analyze_conflict(&mut self, add_id: u32) {
         //println!("analyze {}: {:#?}", add_id, self);
         self.conflict.clear();
-            let add_lit = self.edges[add_id as usize].lit;
-            if add_lit != LIT_UNDEF {
-                self.conflict.push(add_lit);
-            }
-        
+        let add_lit = self.edges[add_id as usize].lit;
+        if add_lit != LIT_UNDEF {
+            self.conflict.push(add_lit);
+        }
+
         let mut edge_id = self.nodes[self.edges[add_id as usize].from as usize].pred;
         while edge_id != add_id as i32 {
             let lit = self.edges[edge_id as usize].lit;
@@ -126,7 +131,6 @@ impl IdlGraph {
             edge_id = self.nodes[self.edges[edge_id as usize].from as usize].pred;
         }
     }
-
 }
 
 const V0: DVar = DVar(1);
@@ -136,9 +140,10 @@ impl InnerIdl {
         let mut idl = InnerIdl {
             next_dvar: 0,
             conditions: HashMap::new(),
+            #[cfg(debug_assertions)]
             requires_backtrack: false,
-            trail :Vec::new(),
-            trail_lim :Vec::new(),
+            trail: Vec::new(),
+            trail_lim: Vec::new(),
             graph: IdlGraph {
                 conflict: Vec::new(),
                 nodes: Vec::new(),
@@ -179,15 +184,18 @@ impl InnerIdl {
         }
     }
 
-    fn enable(&mut self, e :u32) -> bool{
-      let val = self.graph.enable_edge(e);
-      if val { self.trail.push(e); }
-      val
+    fn enable(&mut self, e: u32) -> bool {
+        let val = self.graph.enable_edge(e);
+        if val {
+            self.trail.push(e);
+        }
+        val
     }
 }
 
 impl Theory for InnerIdl {
     fn check(&mut self, _ch: Check, lits: &[Lit], buf: &mut Refinement) {
+        #[cfg(debug_assertions)]
         assert!(!self.requires_backtrack);
         //println!("check {:?} {:?}", _ch, lits);
         //if let Check::Final = _ch { println!("final trail {:?}\nndoes: {:#?}", self.trail,self.graph.nodes); }
@@ -198,7 +206,10 @@ impl Theory for InnerIdl {
                 if !self.graph.enable_edge(*edge_idx) {
                     //println!("Adding  {:?}", self.graph.conflict);
                     buf.add_clause(self.graph.conflict.iter().map(|l| l.inverse()));
-                    self.requires_backtrack = true;
+                    #[cfg(debug_assertions)]
+                    {
+                        self.requires_backtrack = true;
+                    }
                     return;
                 }
                 self.trail.push(*edge_idx);
@@ -213,20 +224,23 @@ impl Theory for InnerIdl {
     }
 
     fn new_decision_level(&mut self) {
-      self.trail_lim.push(self.trail.len());
-      //println!("new theory decision level {}", self.trail_lim.len());
-      //println!("trail: {:?}", self.trail);
-      //println!("trail_lim: {:?}", self.trail_lim);
+        self.trail_lim.push(self.trail.len());
+        //println!("new theory decision level {}", self.trail_lim.len());
+        //println!("trail: {:?}", self.trail);
+        //println!("trail_lim: {:?}", self.trail_lim);
     }
 
     fn backtrack(&mut self, level: i32) {
         if (level as usize) < self.trail_lim.len() {
-          self.requires_backtrack = false;
-          //println!("backtracking to i={}",self.trail_lim[level as usize]);
-          for edge in self.trail.drain(self.trail_lim[level as usize]..) {
-            self.graph.disable_edge(edge);
-          }
-          self.trail_lim.truncate(level as usize);
+            #[cfg(debug_assertions)]
+            {
+                self.requires_backtrack = false;
+            }
+            //println!("backtracking to i={}",self.trail_lim[level as usize]);
+            for edge in self.trail.drain(self.trail_lim[level as usize]..) {
+                self.graph.disable_edge(edge);
+            }
+            self.trail_lim.truncate(level as usize);
         }
     }
 }
@@ -301,7 +315,7 @@ impl IdlSolver {
         self.prop.solve() == LBOOL_TRUE
     }
 
-    pub fn solve_with_assumptions(&mut self, a :&[Lit]) -> bool {
+    pub fn solve_with_assumptions(&mut self, a: &[Lit]) -> bool {
         self.prop.set_assumptions(a.iter().cloned());
         self.prop.solve() == LBOOL_TRUE
     }
