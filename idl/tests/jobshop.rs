@@ -7,10 +7,10 @@ pub fn jobshop1() {
     let sa = vec![vec![9]];
 
     // makespan 19
-    let sb = vec![vec![9],vec![10]];
+    let sb = vec![vec![9], vec![10]];
 
     // makespan 6
-    let s1 = vec![vec![2,2],vec![2,2]];
+    let s1 = vec![vec![2, 2], vec![2, 2]];
 
     // makespan 28
     let s2 = vec![vec![13, 3], vec![2, 5], vec![1, 3], vec![4, 6], vec![5, 7]];
@@ -110,17 +110,12 @@ pub fn jobshop1() {
 
         if s.solve() {
             println!("SAT");
-            let mut output: Vec<Vec<u8>> = vec![Vec::new(); num_machines];
+            let mut output: Vec<Vec<u8>> = vec![vec!['_' as u8; val as usize]; num_machines];
             for (job_idx, job) in jobs.iter().enumerate() {
                 for (machine_idx, (machine_start, machine_end)) in job.iter().enumerate() {
                     let t1 = s.get_value(*machine_start);
                     let t2 = s.get_value(*machine_end);
                     println!("j{} m{} t{}-t{}", job_idx, machine_idx, t1, t2);
-                    for s in output.iter_mut() {
-                        while s.len() < t2 as usize {
-                            s.push('_' as u8);
-                        }
-                    }
                     for c in &mut output[machine_idx][t1 as usize..t2 as usize] {
                         *c = std::char::from_digit(job_idx as u32, 10).unwrap() as u8;
                     }
