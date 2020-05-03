@@ -761,6 +761,13 @@ impl<Th: Theory> DplltSolver<Th> {
         self.learnts.len()
     }
 
+    pub fn value(&self, lit: Lit) -> bool {
+        if !self.ok { panic!("no model available"); }
+        let value = self.model[lit.var().idx()];
+        assert!(value != LBOOL_UNDEF);
+        (value == LBOOL_TRUE) ^ lit.sign()
+    }
+
     pub fn get_model(&self) -> Option<&[LBool]> {
         if !self.ok || (self.model.len() as i32) < self.next_var {
             return None;
