@@ -1,4 +1,5 @@
 use mysatsolver::*;
+pub use mysatsolver::Lit;
 use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -280,7 +281,7 @@ impl IdlSolver {
     /// let x = s.new_int();
     /// s.add_diff(None, s.zero(), x, -2); // 0 - x <= -2   (i.e. x >= 2)
     /// assert!(s.solve());
-    /// assert!(s.get_value(x) >= 2);
+    /// assert!(s.get_int_value(x) >= 2);
     /// ```
     pub fn zero(&self) -> DVar {
         V0
@@ -303,8 +304,8 @@ impl IdlSolver {
     /// s.add_diff(None, y, z, -5);
     /// s.add_diff(None, x, y, -5);
     /// assert!(s.solve());
-    /// assert!(s.get_value(x) + 5 <= s.get_value(y));
-    /// assert!(s.get_value(y) + 5 <= s.get_value(z));
+    /// assert!(s.get_int_value(x) + 5 <= s.get_int_value(y));
+    /// assert!(s.get_int_value(y) + 5 <= s.get_int_value(z));
     /// ```
     pub fn add_diff(&mut self, lit: Option<Lit>, x: DVar, y: DVar, k: i32) {
         self.inner().add_constraint(lit, x, y, k);
@@ -320,8 +321,12 @@ impl IdlSolver {
         self.prop.solve() == LBOOL_TRUE
     }
 
-    pub fn get_value(&mut self, DVar(x): DVar) -> i32 {
+    pub fn get_int_value(&mut self, DVar(x): DVar) -> i32 {
         let idl = &self.prop.theory;
         idl.graph.nodes[1].dist - idl.graph.nodes[x as usize].dist
+    }
+
+    pub fn get_bool_value(&mut self, lit :Lit) -> bool {
+        self.prop.value(lit)
     }
 }

@@ -87,7 +87,7 @@ pub fn jobshop1() {
         }
         let mut lo = 0;
         let mut best = None;
-        let mut hi = s.get_value(max_time);
+        let mut hi = s.get_int_value(max_time);
         let (b, val) = loop {
             let mid = (lo + hi) / 2;
             println!("binsearch {} {} {}", lo, mid, hi);
@@ -113,8 +113,8 @@ pub fn jobshop1() {
             let mut output: Vec<Vec<u8>> = vec![vec!['_' as u8; val as usize]; num_machines];
             for (job_idx, job) in jobs.iter().enumerate() {
                 for (machine_idx, (machine_start, machine_end)) in job.iter().enumerate() {
-                    let t1 = s.get_value(*machine_start);
-                    let t2 = s.get_value(*machine_end);
+                    let t1 = s.get_int_value(*machine_start);
+                    let t2 = s.get_int_value(*machine_end);
                     println!("j{} m{} t{}-t{}", job_idx, machine_idx, t1, t2);
                     for c in &mut output[machine_idx][t1 as usize..t2 as usize] {
                         *c = std::char::from_digit(job_idx as u32, 10).unwrap() as u8;
