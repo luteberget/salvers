@@ -1,10 +1,14 @@
 pub trait Lit : std::ops::Not<Output = Self> + Copy + Clone {}
+
 pub type Model<L> = Vec<L>;
 pub type Conflict<L> = Vec<L>;
 
-pub trait SatSolver<L : Lit> {
+pub trait SatInstance<L : Lit> {
   fn new_var(&mut self) -> L;
   fn add_clause(&mut self, clause :impl IntoIterator<Item = impl Into<L>>);
+}
+
+pub trait SatSolver<L :Lit> {
   fn solve(&mut self, assumptions :impl IntoIterator<Item = L>) -> Result<Model<L>, Conflict<L>>;
 }
 

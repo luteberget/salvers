@@ -21,7 +21,7 @@ impl<L: Lit> Totalizer<L> {
 
     /// Produce a totalizer cardinality constraint by counting the given literals up to the
     /// bound given by the `rhs` parameter.
-    pub fn count<S: SatSolver<L>>(
+    pub fn count<S: SatInstance<L>>(
         solver: &mut S,
         items: impl IntoIterator<Item = L>,
         rhs: u32,
@@ -30,7 +30,7 @@ impl<L: Lit> Totalizer<L> {
     }
 
     /// Merge a set of totalizers into a new one with the upper bound given by the `rhs` parameter.
-    pub fn merge<S: SatSolver<L>>(
+    pub fn merge<S: SatInstance<L>>(
         solver: &mut S,
         items: impl IntoIterator<Item = Self>,
         rhs: u32,
@@ -69,7 +69,7 @@ impl<L: Lit> Totalizer<L> {
     }
 
     /// Increase the bound of the totalizer. Adds variables and constraints using the given solver.
-    pub fn increase_bound<S: SatSolver<L>>(&mut self, solver: &mut S, rhs: u32) {
+    pub fn increase_bound<S: SatInstance<L>>(&mut self, solver: &mut S, rhs: u32) {
         let kmin = (rhs + 1).min(self.nof_input);
         if kmin as usize <= self.lits.len() {
             return;
@@ -82,7 +82,7 @@ impl<L: Lit> Totalizer<L> {
     }
 }
 
-fn add_totalizer_constraints<L: Lit, S: SatSolver<L>>(
+fn add_totalizer_constraints<L: Lit, S: SatInstance<L>>(
     solver: &mut S,
     ov: &mut Vec<L>,
     rhs: u32,
