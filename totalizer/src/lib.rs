@@ -119,21 +119,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn basic0() {
+    fn one_of_each() {
         let mut solver = Solver::new();
         let x1 = solver.new_var();
         let x2 = solver.new_var();
         let totalizer1 = Totalizer::count(&mut solver, [x1,x2].iter().cloned(), 2);
         let totalizer2 = Totalizer::count(&mut solver, [!x1,!x2].iter().cloned(), 2);
-        //solver.add_clause([!totalizer1.rhs()[0]].iter().cloned());
-        solver.add_clause([!totalizer2.rhs()[0]].iter().cloned());
+        solver.add_clause([!totalizer1.rhs()[1]].iter().cloned());
+        solver.add_clause([!totalizer2.rhs()[1]].iter().cloned());
         let model = solver.solve().unwrap();
         println!("value x1 {:?} = {:?}", x1, model.value(&x1));
         println!("value x2 {:?} = {:?}", x2, model.value(&x2));
+        assert!([x1,x2].iter().map(|x| if model.value(x) { 1 } else { 0 }).sum::<usize>() == 1);
     }
 
     #[test]
-    fn basic() {
+    fn partition_10() {
         let mut solver = Solver::new();
         let xs = (0..10).map(|_| solver.new_var()).collect::<Vec<_>>();
         solver.add_clause([xs[0],xs[1]].iter().cloned());
@@ -148,35 +149,19 @@ mod tests {
         let totalizer = Totalizer::count(&mut solver, xs.iter().map(|x| !*x), 3);
         solver.add_clause([!totalizer.rhs()[3]].iter().cloned()); // there is not 3 bs
 
-        // at least one per 2 must be A
-        // then count the Bs
-        // cannot have more than X Bs.
-
-        //let mut set_max_as = |s :&mut Solver, n :usize| {
-        //    use sattrait::*;
-        //    let totalizer = Totalizer::count(s, xs.iter().map(|x| *x), n as u32);
-        //    s.add_clause([!totalizer.rhs()[n as usize]].iter().cloned());
-        //};
-        //let mut set_max_bs = |s :&mut Solver, n :usize| {
-        //    use sattrait::*;
-        //    let totalizer = Totalizer::count(s, xs.iter().map(|x| !*x), n as u32);
-        //    s.add_clause([!totalizer.rhs()[n as usize]].iter().cloned());
-        //};
-
-        //set_max_as(&mut solver, 8);
-        //set_max_bs(&mut solver, 2);
-
         // At least one is true
         let model = solver.solve().unwrap();
         println!("values {:?}", xs.iter().map(|x| if model.value(x) { 'A' } else { 'B' }).collect::<Vec<char>>());
     }
 
     #[test]
-    fn it_works() {
+    fn combinations() {
         for num_vars in 1..10 {
             for count_bound in 0..=num_vars {
                 for maximum in 0..=count_bound {
                     for asserted in 0..=num_vars {
+                        println!("n{} bound{} max{} assert{}",  num_vars, count_bound, maximum, asserted);
+
                         let mut solver = Solver::new();
                         let xs = (0..num_vars).map(|_| solver.new_var()).collect::<Vec<_>>();
                         for a in 0..asserted {
@@ -186,9 +171,10 @@ mod tests {
 
                         let totalizer = Totalizer::count(&mut solver, xs.iter().cloned(), count_bound as u32);
                         assert!(totalizer.rhs().len() == (xs.len()).min(count_bound +1));
-                        solver.add_clause(Some(!totalizer.rhs()[maximum as usize]));
+                        if (maximum as usize) < totalizer.rhs().len() {
+                          solver.add_clause(Some(!totalizer.rhs()[maximum as usize]));
+                        }
 
-                        println!("n{} bound{} max{} assert{}",  num_vars, count_bound, maximum, asserted);
                         let should_succeed = asserted <= maximum;
                         if should_succeed {
                             let model = solver.solve().unwrap();
@@ -200,19 +186,6 @@ mod tests {
                         }
                     }
                 }
-
-                //for minimum in 0..(count_bound as isize -1) {
-                //    let minimum = minimum as u32;
-                //    let mut solver = Solver::new();
-                //    let xs = (0..num_vars).map(|_| solver.new_var()).collect::<Vec<_>>();
-                //    let totalizer = Totalizer::count(&mut solver, xs.iter().cloned(), count_bound);
-                //    solver.add_clause([totalizer.rhs()[minimum as usize + 1]].iter().cloned());
-                //    let model = solver.solve().unwrap();
-                //    let values = xs.iter().map(|v| model.value(v)).collect::<Vec<_>>();
-                //    println!("n{} b{} min{} values {:?}", num_vars, count_bound, minimum, values);
-                //    assert!(values.iter().map(|x| if *x { 1u32 } else { 0u32 }).sum::<u32>() >= minimum);
-
-                //}
             }
         }
     }
