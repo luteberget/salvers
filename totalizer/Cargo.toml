@@ -8,3 +8,6 @@ edition = "2018"
 
 [dependencies]
 sattrait = { path = "../sattrait" }
+
+[dev-dependencies]
+minisat = { path = "../../minisat-rs" }
