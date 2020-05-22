@@ -1,7 +1,7 @@
 use sattrait::*;
+use totalizer::*;
 use std::collections::HashMap;
 use std::hash::Hash;
-use totalizer::*;
 
 /// Soft clauses implemented by
 /// relaxable cardinality constraints.
@@ -45,25 +45,26 @@ impl<L: Lit + Hash + PartialEq + Eq> RC2SoftClauses<L> {
     /// subset, then the whole instance is unsatifisable, and `increase_cost` returns `None`.  If
     /// the `solve` parameter returns a model, then the instance is satisfiable and,
     /// `increase_cost` returns a tuple containing the cost and the model.
-    pub fn increase_cost<S: SatInstance<L>, M, F>(
+    pub fn increase_cost<S: SatInstance<L>, F>(
         &mut self,
         sat: &mut S,
         mut solve: F,
-    ) -> Option<(u32, M)>
+    ) -> Option<u32>
     where
-        F: FnMut(&mut S, &mut dyn Iterator<Item = &L>) -> Result<M, Vec<L>>,
+        F: FnMut(&mut S, &mut dyn Iterator<Item = L>) -> Result<(), Vec<L>>,
     {
         loop {
-            let mut assumptions = self.selectors.keys().chain(self.sums.keys());
-            match solve(sat, &mut assumptions) {
-                Ok(model) => {
-                    return Some((self.cost, model));
+            let assumptions = self.selectors.keys().chain(self.sums.keys()).cloned();
+            match solve(sat, &mut assumptions.into_iter()) {
+                Ok(_) => {
+                    return Some(self.cost);
                 }
                 Err(core) if core.len() == 0 => {
                     return None;
                 },
                 Err(core) => {
                     self.cost += 1;
+                    debug_assert!(core.iter().all(|l| self.selectors.contains_key(l) || self.sums.contains_key(l)));
                     if core.len() == 1 { 
                         sat.add_clause([!core[0]].iter().cloned());
                     }
@@ -89,3 +90,41 @@ impl<L: Lit + Hash + PartialEq + Eq> RC2SoftClauses<L> {
         } // if not, the clauses are a lost cause, their full cost is already added.
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use minisat::*;
+
+    #[test]
+    pub fn example0() {
+        // pure maxsat formula example from J. Marques-Silva's slides.
+        let mut s = Solver::new();
+        let x = (0..=8).map(|_| s.new_var()).collect::<Vec<_>>();
+
+        let mut soft = RC2SoftClauses::new();
+        soft.add_soft_clause(&mut s, vec![x[6], x[2]]);
+        soft.add_soft_clause(&mut s, vec![!x[6], x[2]]);
+        soft.add_soft_clause(&mut s, vec![!x[2], x[1]]);
+        soft.add_soft_clause(&mut s, vec![!x[1]]);
+        soft.add_soft_clause(&mut s, vec![!x[6],x[8]]);
+        soft.add_soft_clause(&mut s, vec![x[6],!x[8]]);
+        soft.add_soft_clause(&mut s, vec![x[2],x[4]]);
+        soft.add_soft_clause(&mut s, vec![!x[4],x[5]]);
+        soft.add_soft_clause(&mut s, vec![x[7],x[5]]);
+        soft.add_soft_clause(&mut s, vec![!x[7],x[5]]);
+        soft.add_soft_clause(&mut s, vec![!x[5],x[3]]);
+        soft.add_soft_clause(&mut s, vec![!x[3]]);
+
+        let result = soft.increase_cost(&mut s, |s, assumptions| {
+            s.solve_under_assumptions(assumptions)
+                .map(|_| ())
+                .map_err(|b| b.collect())
+        });
+
+        assert!(result.is_some());
+        assert!(result.unwrap() == 2);
+
+    }
+}
+
