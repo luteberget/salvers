@@ -1498,6 +1498,7 @@ impl<Th: Theory> DplltSolver<Th> {
                         }
                     }
                 }
+                self.seen[var.idx()] = 0;
             }
             i -= 1;
         }
