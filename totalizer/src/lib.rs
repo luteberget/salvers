@@ -127,7 +127,7 @@ mod tests {
         let totalizer2 = Totalizer::count(&mut solver, [!x1,!x2].iter().cloned(), 2);
         solver.add_clause([!totalizer1.rhs()[1]].iter().cloned());
         solver.add_clause([!totalizer2.rhs()[1]].iter().cloned());
-        let model = solver.solve().unwrap();
+        let model = solver.solve().ok().unwrap();
         println!("value x1 {:?} = {:?}", x1, model.value(&x1));
         println!("value x2 {:?} = {:?}", x2, model.value(&x2));
         assert!([x1,x2].iter().map(|x| if model.value(x) { 1 } else { 0 }).sum::<usize>() == 1);
@@ -150,7 +150,7 @@ mod tests {
         solver.add_clause([!totalizer.rhs()[3]].iter().cloned()); // there is not 3 bs
 
         // At least one is true
-        let model = solver.solve().unwrap();
+        let model = solver.solve().ok().unwrap();
         println!("values {:?}", xs.iter().map(|x| if model.value(x) { 'A' } else { 'B' }).collect::<Vec<char>>());
     }
 
@@ -177,7 +177,7 @@ mod tests {
 
                         let should_succeed = asserted <= maximum;
                         if should_succeed {
-                            let model = solver.solve().unwrap();
+                            let model = solver.solve().ok().unwrap();
                             let values = xs.iter().map(|v| model.value(v)).collect::<Vec<_>>();
                             println!("  values {:?}", values);
                             assert!(values.iter().map(|x| if *x { 1 } else { 0 }).sum::<usize>() <= maximum);

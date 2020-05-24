@@ -1,21 +1,24 @@
 pub trait Lit : std::ops::Not<Output = Self> + Copy + Clone {}
 
-pub type Model<L> = Vec<L>;
-pub type Conflict<L> = Vec<L>;
-
 pub trait SatInstance<L : Lit> {
   fn new_var(&mut self) -> L;
   fn add_clause(&mut self, clause :impl IntoIterator<Item = impl Into<L>>);
 }
 
-pub trait SatSolver<L :Lit> {
-  fn solve(&mut self, assumptions :impl IntoIterator<Item = L>) -> Result<Model<L>, Conflict<L>>;
+pub trait Model<L : Lit> {
+  fn value(&self, l :L) -> bool;
 }
 
-pub trait SatSolverTheory<L: Lit, R: Refinement<L>> {
-  fn solve_with_theory(&mut self, assumptions :impl IntoIterator<Item = L>, 
-                       theory :&mut impl Theory<L, R>) -> Result<Model<L>, Conflict<L>>;
+pub type SatResult<'a, L> = Result<Box<dyn Model<L> + 'a>, Box<dyn Iterator<Item = L> + 'a>>;
+pub trait SatSolver<L :Lit> {
+  fn solve<'a>(&'a mut self, assumptions :impl IntoIterator<Item = impl Into<L>>) -> SatResult<'a,L>;
+  fn result<'a>(&'a self) -> SatResult<'a,L>;
 }
+
+//pub trait SatSolverTheory<L: Lit, R: Refinement<L>> {
+//  fn solve_with_theory(&mut self, assumptions :impl IntoIterator<Item = L>, 
+//                       theory :&mut impl Theory<L, R>) -> Result<Model<L>, Conflict<L>>;
+//}
 
 pub trait Refinement<L :Lit> {
   fn add_deduced(&mut self, l: L, rref :u32);

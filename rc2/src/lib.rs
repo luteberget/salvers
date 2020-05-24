@@ -1,7 +1,7 @@
 use sattrait::*;
-use totalizer::*;
 use std::collections::HashMap;
 use std::hash::Hash;
+use totalizer::*;
 
 /// Soft clauses implemented by
 /// relaxable cardinality constraints.
@@ -45,27 +45,33 @@ impl<L: Lit + Hash + PartialEq + Eq> RC2SoftClauses<L> {
     /// subset, then the whole instance is unsatifisable, and `increase_cost` returns `None`.  If
     /// the `solve` parameter returns a model, then the instance is satisfiable and,
     /// `increase_cost` returns a tuple containing the cost and the model.
-    pub fn increase_cost<S: SatInstance<L>, F>(
+    pub fn increase_cost<'a, S: SatInstance<L> + SatSolver<L>>(
         &mut self,
-        sat: &mut S,
-        mut solve: F,
-    ) -> Option<u32>
-    where
-        F: FnMut(&mut S, &mut dyn Iterator<Item = L>) -> Result<(), Vec<L>>,
-    {
+        sat: &'a mut S,
+    ) -> Option<(u32, Box<dyn Model<L> + 'a>)> {
+        /* this function was a lifetime nightmare */
         loop {
-            let assumptions = self.selectors.keys().chain(self.sums.keys()).cloned();
-            match solve(sat, &mut assumptions.into_iter()) {
+            let mut assumptions = self.selectors.keys().chain(self.sums.keys()).cloned();
+            let mut result = sat.solve(&mut assumptions);
+            match result {
                 Ok(_) => {
-                    return Some(self.cost);
+                    drop(result);
+                    let model = sat.result().ok().unwrap(); /* need to reborrow model to satisfy lifetimes */
+                    return Some((self.cost, model));
                 }
-                Err(core) if core.len() == 0 => {
-                    return None;
-                },
-                Err(core) => {
+                Err(ref mut core) => {
+                    let core = core.collect::<Vec<_>>();
+                    drop(result);
+
+                    if core.len() == 0 {
+                        /* UNSAT hard clauses. */
+                        return None;
+                    }
                     self.cost += 1;
-                    debug_assert!(core.iter().all(|l| self.selectors.contains_key(l) || self.sums.contains_key(l)));
-                    if core.len() == 1 { 
+                    debug_assert!(core
+                        .iter()
+                        .all(|l| self.selectors.contains_key(l) || self.sums.contains_key(l)));
+                    if core.len() == 1 {
                         sat.add_clause([!core[0]].iter().cloned());
                     }
                     for l in core.iter() {
@@ -77,7 +83,7 @@ impl<L: Lit + Hash + PartialEq + Eq> RC2SoftClauses<L> {
                     }
                     let relax = core.iter().map(|l| !*l);
                     let count = Totalizer::count(sat, relax, 1);
-                    self.add_soft_card(count, 1); // note that this does nothing if relax.len() == 1.
+                    self.add_soft_card(count, 1); /* note that this does nothing if relax.len() == 1. */
                 }
             };
         }
@@ -107,24 +113,33 @@ mod tests {
         soft.add_soft_clause(&mut s, vec![!x[6], x[2]]);
         soft.add_soft_clause(&mut s, vec![!x[2], x[1]]);
         soft.add_soft_clause(&mut s, vec![!x[1]]);
-        soft.add_soft_clause(&mut s, vec![!x[6],x[8]]);
-        soft.add_soft_clause(&mut s, vec![x[6],!x[8]]);
-        soft.add_soft_clause(&mut s, vec![x[2],x[4]]);
-        soft.add_soft_clause(&mut s, vec![!x[4],x[5]]);
-        soft.add_soft_clause(&mut s, vec![x[7],x[5]]);
-        soft.add_soft_clause(&mut s, vec![!x[7],x[5]]);
-        soft.add_soft_clause(&mut s, vec![!x[5],x[3]]);
+        soft.add_soft_clause(&mut s, vec![!x[6], x[8]]);
+        soft.add_soft_clause(&mut s, vec![x[6], !x[8]]);
+        soft.add_soft_clause(&mut s, vec![x[2], x[4]]);
+        soft.add_soft_clause(&mut s, vec![!x[4], x[5]]);
+        soft.add_soft_clause(&mut s, vec![x[7], x[5]]);
+        soft.add_soft_clause(&mut s, vec![!x[7], x[5]]);
+        soft.add_soft_clause(&mut s, vec![!x[5], x[3]]);
         soft.add_soft_clause(&mut s, vec![!x[3]]);
 
-        let result = soft.increase_cost(&mut s, |s, assumptions| {
-            s.solve_under_assumptions(assumptions)
-                .map(|_| ())
-                .map_err(|b| b.collect())
-        });
+        let result = soft.increase_cost(&mut s);
 
-        assert!(result.is_some());
-        assert!(result.unwrap() == 2);
-
+        if let Some((cost, model)) = result {
+            assert!(cost == 2);
+            let values = x
+                .iter()
+                .enumerate()
+                .map(|(i, x)| {
+                    if model.value(*x) {
+                        format!(" x{}", i)
+                    } else {
+                        format!("!x{}", i)
+                    }
+                })
+                .collect::<Vec<_>>();
+            println!("Values: {:?}", values);
+        } else {
+            panic!("unsat");
+        }
     }
 }
-
