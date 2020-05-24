@@ -1,3 +1,4 @@
+use sattrait;
 use bitfield::bitfield;
 use log::{debug, info, trace};
 use std::io::Write;
@@ -178,6 +179,11 @@ impl Lit {
     pub fn inverse(&self) -> Lit {
         Self::new(self.var(), !self.sign())
     }
+}
+
+impl std::ops::Not for Lit {
+  type Output = Lit;
+  fn not(self) -> Lit { self.inverse() }
 }
 
 pub const LIT_UNDEF: Lit = Lit(-2);
@@ -1401,7 +1407,7 @@ impl<Th: Theory> DplltSolver<Th> {
 
         let mut i = 0;
         let mut p = p;
-        'outer: loop {
+        loop {
             i += 1;
             trace!(" lit redundant i={}", i);
 
@@ -2428,7 +2434,7 @@ pub fn drand(seed: &mut f64) -> f64 {
 }
 
 pub fn irand(seed: &mut f64, size: i32) -> i32 {
-    (drand(seed) as i32 * size)
+    drand(seed) as i32 * size
 }
 
 pub fn solver_from_dimacs_filename(filename: &str) -> SatSolver {
@@ -2458,3 +2464,16 @@ pub fn solver_from_dimacs_filename(filename: &str) -> SatSolver {
     }
     s
 }
+
+
+
+impl sattrait::Lit for Lit {}
+impl<T :Theory> sattrait::SatInstance<Lit> for DplltSolver<T> {
+  fn new_var(&mut self) -> Lit { self.new_var_default() }
+  fn add_clause(&mut self, c: impl IntoIterator<Item = impl Into<Lit>>) { 
+    self.add_clause(c.into_iter().map(|x| x.into()));
+}
+
+}
+
+
