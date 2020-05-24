@@ -82,7 +82,7 @@ pub fn jobshop1() {
             }
         }
 
-        if !s.solve() {
+        if !s.solve().is_ok() {
             panic!();
         }
         let mut lo = 0;
@@ -93,7 +93,7 @@ pub fn jobshop1() {
             println!("binsearch {} {} {}", lo, mid, hi);
             let x = s.new_bool();
             s.add_diff(Some(x), max_time, s.zero(), mid); // max_time <= 5   --> max_time >= 5
-            if s.solve_with_assumptions(&vec![x]) {
+            if s.solve_with_assumptions(&vec![x]).is_ok() {
                 println!("mid={} success", mid);
                 best = Some(x);
                 hi = mid;
@@ -108,7 +108,7 @@ pub fn jobshop1() {
         };
         s.add_diff(None, max_time, s.zero(), val); // max_time <= 5   --> max_time >= 5
 
-        if s.solve() {
+        if s.solve().is_ok() {
             println!("SAT");
             let mut output: Vec<Vec<u8>> = vec![vec!['_' as u8; val as usize]; num_machines];
             for (job_idx, job) in jobs.iter().enumerate() {
