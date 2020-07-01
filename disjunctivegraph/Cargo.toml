@@ -1,5 +1,5 @@
 [package]
-name = "rc2"
+name = "disjunctivegraph"
 version = "0.1.0"
 authors = ["Bjørnar Luteberget <luteberget@gmail.com>"]
 edition = "2018"
@@ -7,9 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+smallvec = "1.4"
 sattrait = { path = "../sattrait" }
-totalizer = { path = "../totalizer" }
+mysatsolver = { path = ".." }
 hprof = "0.1"
-
-[dev-dependencies]
-minisat = { path = "../../minisat-rs" }

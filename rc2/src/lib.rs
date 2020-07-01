@@ -7,15 +7,17 @@ use totalizer::*;
 /// relaxable cardinality constraints.
 pub struct RC2SoftClauses<L: Lit + Hash + PartialEq + Eq> {
     cost: u32,
+    maxcost :u32,
     selectors: HashMap<L, ()>,
     sums: HashMap<L, (Totalizer<L>, u32)>,
 }
 
-impl<L: Lit + Hash + PartialEq + Eq> RC2SoftClauses<L> {
+impl<L: Lit + Hash + PartialEq + Eq + core::fmt::Debug> RC2SoftClauses<L> {
     /// Empty set of soft clauses.
     pub fn new() -> Self {
         RC2SoftClauses {
             cost: 0,
+            maxcost: 0,
             selectors: HashMap::new(),
             sums: HashMap::new(),
         }
@@ -35,6 +37,7 @@ impl<L: Lit + Hash + PartialEq + Eq> RC2SoftClauses<L> {
             s
         };
 
+        self.maxcost += 1;
         self.selectors.insert(selector, ());
     }
 
@@ -52,7 +55,7 @@ impl<L: Lit + Hash + PartialEq + Eq> RC2SoftClauses<L> {
         /* this function was a lifetime nightmare */
         loop {
             let mut assumptions = self.selectors.keys().chain(self.sums.keys()).cloned();
-            let mut result = sat.solve(&mut assumptions);
+            let mut result = { let _p = hprof::enter("sat solve"); sat.solve(&mut assumptions) };
             match result {
                 Ok(_) => {
                     drop(result);
@@ -63,11 +66,14 @@ impl<L: Lit + Hash + PartialEq + Eq> RC2SoftClauses<L> {
                     let core = core.collect::<Vec<_>>();
                     drop(result);
 
+                    //println!("Got CORE {:?}", core);
+
                     if core.len() == 0 {
                         /* UNSAT hard clauses. */
                         return None;
                     }
                     self.cost += 1;
+		    println!("COST {:?}/{}", self.cost, self.maxcost);
                     debug_assert!(core
                         .iter()
                         .all(|l| self.selectors.contains_key(l) || self.sums.contains_key(l)));

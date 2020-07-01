@@ -171,7 +171,7 @@ impl InnerIdl {
     }
 
     fn add_constraint(&mut self, lit: Option<Lit>, DVar(x): DVar, DVar(y): DVar, k: i32) {
-        hprof::enter("idl add constraint");
+        let _g = hprof::enter("idl add constraint");
         let edge_idx = self.graph.edges.len() as u32;
         self.graph.edges.push(IdlEdge {
             from: -(x as i32),
@@ -188,7 +188,7 @@ impl InnerIdl {
     }
 
     fn enable(&mut self, e: u32) -> bool {
-        hprof::enter("idl enable");
+        let _p = hprof::enter("idl enable");
         let val = self.graph.enable_edge(e);
         if val {
             self.trail.push(e);
