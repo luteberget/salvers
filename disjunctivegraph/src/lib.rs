@@ -1,4 +1,5 @@
 pub mod longestpaths;
+pub mod orderheap;
 use longestpaths::*;
 
 pub use mysatsolver::Lit;

@@ -208,7 +208,7 @@ impl IncrementalLongestPaths {
         // So we might put seen and visited as bit fields on edge_data, and then undo them
         // when the function ends (at a cycle, at sum violation(?) or at success).
         let mut seen = HashSet::new();
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::new(); // needed only for cycle check. But cycle check can be simplified to visiting edge.start.
 
         let edge_data = &self.edge_data[edge.0 as usize];
         if self.value(edge_data.start_node) + edge_data.length > self.value(edge_data.end_node) {
@@ -218,7 +218,7 @@ impl IncrementalLongestPaths {
             while let Some((_, v)) = self.scratch.queue.pop() {
                 visited.insert(v);
 
-		// WRITE
+                // WRITE
                 self.update_path(Node(v), update);
 
                 for e in self.node_incoming[v as usize].iter() {
@@ -229,7 +229,7 @@ impl IncrementalLongestPaths {
                     }
                     let is_critical = self.value(edge_data.start_node) + edge_data.length
                         == self.value(edge_data.end_node);
-		    // WRITE
+                    // WRITE
                     self.edge_data[e.0 as usize].is_critical = is_critical;
                 }
 
@@ -253,7 +253,7 @@ impl IncrementalLongestPaths {
                     } else if self.value(Node(v)) + edge_data.length
                         == self.value(edge_data.end_node)
                     {
-		        // WRITE
+                        // WRITE
                         self.edge_data[e.0 as usize].is_critical = true;
                     }
                 }
