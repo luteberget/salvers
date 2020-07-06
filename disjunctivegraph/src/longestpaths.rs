@@ -109,7 +109,8 @@ impl LongestPaths {
                     debug_assert!(self.edge_data[add_idx as usize].source < 0);
 
                     // Return the cycle.
-                    return Err(CycleIterator { graph: self });
+                    let node = Node(self.edge_data[add_idx as usize].target);
+                    return Err(CycleIterator { graph: self, node: Some(node), start_node: node });
                 }
 
                 updated_root = true;
@@ -233,5 +234,57 @@ impl LongestPaths {
 
 pub struct CycleIterator<'a> {
    graph :&'a LongestPaths,
+   start_node :Node,
+   node :Option<Node>,
+}
+
+
+impl<'a> Iterator for CycleIterator<'a> {
+    type Item = Edge;
+
+    fn next(&mut self) -> Option<Edge> {
+        if let Some(node) = self.node {
+            let edge_idx = self.graph.node_updated_from[node.0 as usize];
+            let edge = &self.graph.edge_data[edge_idx as usize];
+            debug_assert!(edge.source > 0);
+            if edge.source == self.start_node.0 as i32  {
+                // Iterator done
+                self.node = None;
+            } else {
+                self.node = Some(Node(edge.source as u32));
+            }
+            Some(Edge(edge_idx as u32))
+        } else {
+            None
+        }
+    }
+}
+
+//
+// TODO: if there are multiple critical paths that are all the same (maximal) length
+// then the consumer could want all of them.
+// For example, if the iterator is used for backtracking a search, there might be an
+// efficiency gain in finding many paths here at the same time.
+//
+
+pub struct CriticalPathIterator<'a> {
+    graph :&'a LongestPaths,
+    node :Node,
+}
+
+impl<'a> Iterator for CriticalPathIterator<'a> {
+    type Item = Edge;
+
+    fn next(&mut self) -> Option<Edge> {
+        let edge_idx = self.graph.node_updated_from[self.node.0 as usize];
+        if edge_idx == -1 {
+            None
+        } else {
+            debug_assert!(self.graph.edge_data[edge_idx as usize].source > 0);
+            self.node = Node(self.graph.edge_data[edge_idx as usize].source as u32);
+            Some(Edge(edge_idx as u32))
+        }
+    }
+
 }
 
