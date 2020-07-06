@@ -1275,6 +1275,7 @@ impl<Th: Theory> DplltSolver<Th> {
         mut conflict_clause: ClauseHeaderOffset,
         out_learnt: &mut Vec<Lit>,
     ) -> i32 {
+        let _p = hprof::enter("analyze");
         trace!("--> ANALYZE cref{}", conflict_clause);
         let mut path_c = 0;
         let mut p = LIT_UNDEF;
@@ -1519,6 +1520,7 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     fn propagate_bool(&mut self) -> ClauseHeaderOffset {
+        let _p = hprof::enter("propagate_bool");
         trace!("-> PROPAGATE");
         let mut conflict_clause = CLAUSE_NONE;
         let mut num_props = 0;
@@ -1970,6 +1972,7 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     fn propagate(&mut self) -> ClauseHeaderOffset {
+        let _p = hprof::enter("propagate");
         loop {
             self.theory_final_checked = false;
             let bool_prop = self.propagate_bool();
