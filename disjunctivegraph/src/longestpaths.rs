@@ -7,6 +7,7 @@ pub struct Node(u32);
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Edge(u32);
 
+#[derive(Debug)]
 struct EdgeData {
     source :i32,
     target :u32,
@@ -28,7 +29,7 @@ pub struct LongestPaths {
 
 impl LongestPaths {
     pub fn new() -> Self {
-        LongestPaths {
+        let mut p = LongestPaths {
             n_nodes: 0,
             n_edges: 0,
             edge_data :Vec::new(),
@@ -39,11 +40,13 @@ impl LongestPaths {
 
             current_updates: Vec::new(),
             queue: OrderHeap::new(),
-        }
+        };
+        p.new_node(); // waste the first node because we need the sign bit
+        p
     }
 
     pub fn new_node(&mut self) -> Node {
-        let node = Node(self.n_nodes as u32 + 1);
+        let node = Node(self.n_nodes as u32);
         self.n_nodes += 1;
         self.node_outgoing.push(Default::default());
         self.node_incoming.push(Default::default());
@@ -65,21 +68,34 @@ impl LongestPaths {
 
     pub fn value(&self, node :Node) -> u32 { self.values[node.0 as usize] }
 
-    pub fn enable_edge<'a>(&'a mut self, Edge(add_idx) :Edge, event :impl Fn(Node,u32,u32)) -> Result<(), CycleIterator<'a>> {
+    pub fn critical_path<'a>(&'a self, node :Node) -> impl Iterator<Item = Edge> + 'a {
+        CriticalPathIterator { graph: self, node }
+    }
+
+    pub fn enable_edge<'a>(&'a mut self, edge :Edge) -> Result<(), CycleIterator<'a>> {
+        self.enable_edge_cb(edge, |_,_,_| {})
+    }
+
+    pub fn enable_edge_cb<'a>(&'a mut self, Edge(add_idx) :Edge, event :impl Fn(Node,u32,u32)) -> Result<(), CycleIterator<'a>> {
         let edge = &mut self.edge_data[add_idx as usize];
 
         let was_already_enabled = edge.source > 0;
         if was_already_enabled {
+            println!("enable_edge: was already enabled");
             return Ok(()); 
         }
         // Enable edge
         edge.source *= -1;
 
-        let is_critical = self.values[edge.source as usize] + edge.distance < self.values[edge.target as usize];
+        let is_critical = self.values[edge.source as usize] + edge.distance > self.values[edge.target as usize];
         if !is_critical {
+            println!("enable_edge: was not critical");
+            println!(" edge: {:?}", edge);
+            println!(" values: {:?}", self.values);
             return Ok(());
         }
 
+        println!("enable_edge: nontrivial");
         self.current_updates.clear();
         debug_assert!(self.queue.is_empty());
         {
@@ -95,7 +111,8 @@ impl LongestPaths {
             self.queue.remove_min(|i| values[edges[*i as usize].target as usize] as i32)
         } {
             let edge = &self.edge_data[edge_idx as usize];
-            let target_updated = self.values[edge.source as usize] + edge.distance < self.values[edge.target as usize];
+            println!("Enabling edge {:?}", edge);
+            let target_updated = self.values[edge.source as usize] + edge.distance > self.values[edge.target as usize];
 
             if target_updated {
                 if updated_root && edge_idx == add_idx as i32 {
@@ -120,7 +137,7 @@ impl LongestPaths {
                 self.values[edge.target as usize] = new_value;
                 event(Node(edge.target), old_value, new_value);
 
-                self.node_updated_from[edge.target as usize] = edge.source;
+                self.node_updated_from[edge.target as usize] = edge_idx;
 
                 for next_edge_idx in self.node_outgoing[edge.target as usize].iter() {
                     if self.edge_data[*next_edge_idx as usize].source < 0 { continue; }
@@ -138,7 +155,11 @@ impl LongestPaths {
         Ok(())
     }
 
-    pub fn disable_edges(&mut self, edges :impl IntoIterator<Item = Edge>, event :impl Fn(Node, u32, u32)) {
+    pub fn disable_edges(&mut self, edges :impl IntoIterator<Item = Edge>) {
+        self.disable_edges_cb(edges, |_,_,_| {})
+    }
+
+    pub fn disable_edges_cb(&mut self, edges :impl IntoIterator<Item = Edge>, event :impl Fn(Node, u32, u32)) {
 
         debug_assert!(self.queue.is_empty());
 
@@ -149,21 +170,25 @@ impl LongestPaths {
             // Was it already disabled?
             let was_enabled = edge.source > 0;
             if !was_enabled {
+                println!("disable {:?}: was already enabled", edge_idx);
                 continue; 
             }
             edge.source *= -1;
 
-            let is_critical = self.values[edge.source as usize] + edge.distance < self.values[edge.target as usize];
-            if !is_critical {
+            let is_not_critical = self.values[-edge.source as usize] + edge.distance < self.values[edge.target as usize];
+            if is_not_critical {
+                println!("disable {:?}: was not critical", edge_idx);
                 continue;
             }
 
             if self.queue.contains(edge_idx as i32) { continue; }
             let values = &self.values;
             let edges = &self.edge_data;
+            println!("adding to queue {:?}", edge_idx);
             self.queue.insert(edge_idx as i32, 
                               |i| values[edges[*i as usize].target as usize] as i32);
         }
+
 
 
         while let Some(edge_idx) = {
@@ -174,12 +199,17 @@ impl LongestPaths {
             let edge = &self.edge_data[edge_idx as usize];
 
             // The values should already be consistent with this edge.
-            debug_assert!(self.values[-edge.source as usize] + edge.distance <= self.values[edge.target as usize]);
+            debug_assert!(self.values[edge.source.abs() as usize] + edge.distance <= self.values[edge.target as usize]);
 
             let is_critical = self.node_updated_from[edge.target as usize] == edge_idx;
+            println!("popping heap: is edge {:?} critical: {:?}", edge, is_critical);
+            println!("node updated from: {:?}", self.node_updated_from);
             if is_critical {
-                let edge_min_value = self.values[-edge.source as usize] + edge.distance;
-                debug_assert!(edge_min_value == self.values[edge.target as usize]);
+                let edge_min_value = self.values[edge.source.abs() as usize] + edge.distance;
+
+                // This assertion is wrong, because the source node might be further back than it
+                // used to be when the node_updated_from pointer was set.
+                //debug_assert!(edge_min_value == self.values[edge.target as usize]);
 
                 // Look backwards to find a critical edge
                 let mut critical_edge = None;
@@ -288,3 +318,58 @@ impl<'a> Iterator for CriticalPathIterator<'a> {
 
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn basic() {
+        let mut lp = LongestPaths::new();
+        let n1 = lp.new_node();
+        let n2 = lp.new_node();
+        let n3 = lp.new_node();
+
+        let e1 = lp.new_edge(n1, n2, 5);
+        let e2 = lp.new_edge(n2, n3, 5);
+        let e3 = lp.new_edge(n1, n3, 6);
+        let e4 = lp.new_edge(n3, n1, 1);
+
+
+        assert!(lp.value(n1) == 0);
+        assert!(lp.value(n2) == 0);
+        assert!(lp.value(n3) == 0);
+
+        assert!(lp.enable_edge(e1).is_ok());
+        assert!(lp.value(n1) == 0);
+        assert!(lp.value(n2) == 5);
+        assert!(lp.value(n3) == 0);
+
+        lp.disable_edges(Some(e1));
+        assert!(lp.value(n1) == 0);
+        assert!(lp.value(n2) == 0);
+        assert!(lp.value(n3) == 0);
+
+        assert!(lp.enable_edge(e1).is_ok());
+        assert!(lp.enable_edge(e2).is_ok());
+        assert!(lp.value(n1) == 0);
+        assert!(lp.value(n2) == 5);
+        assert!(lp.value(n3) == 10);
+        println!("critical path from n3 {:?}", lp.critical_path(n3).collect::<Vec<_>>());
+        assert!(lp.critical_path(n3).collect::<Vec<_>>() == vec![e2,e1]);
+
+        assert!(lp.enable_edge(e3).is_ok());
+        assert!(lp.value(n1) == 0);
+        assert!(lp.value(n2) == 5);
+        assert!(lp.value(n3) == 10);
+
+        lp.disable_edges(vec![e1,e2,e3,e4]);
+        assert!(lp.value(n1) == 0);
+        assert!(lp.value(n2) == 0);
+        assert!(lp.value(n3) == 0);
+
+        println!("parents: {:?}", lp.node_updated_from);
+
+
+    }
+}
