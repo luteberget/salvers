@@ -99,14 +99,41 @@ impl OrderHeap {
             return None;
         }
         let var = self.heap.swap_remove(0);
-        self.indices.insert(self.heap[0], 0);
         self.indices.remove(&var);
         if self.heap.len() > 1 {
+            self.indices.insert(self.heap[0], 0);
             self.percolate_down(0, value);
         }
         Some(var)
     }
 
-    // TODO
-    //pub fn rebuild ?
+    // TODO pub fn rebuild ?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn basic() {
+        let mut heap = OrderHeap::new();
+        let values = vec![9,8,7,6,5,4,3,2,1];
+
+        let v = heap.remove_min(|i| values[*i as usize]);
+        assert_eq!(None, v);
+
+        heap.insert(0, |i| values[*i as usize]);
+        heap.insert(2, |i| values[*i as usize]);
+        heap.insert(1, |i| values[*i as usize]);
+
+        let v = heap.remove_min(|i| values[*i as usize]);
+        assert_eq!(Some(2), v);
+        let v = heap.remove_min(|i| values[*i as usize]);
+        assert_eq!(Some(1), v);
+        let v = heap.remove_min(|i| values[*i as usize]);
+        assert_eq!(Some(0), v);
+        let v = heap.remove_min(|i| values[*i as usize]);
+        assert_eq!(None, v);
+
+    }
 }

@@ -1,5 +1,5 @@
 use smallvec::*;
-use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
+use crate::orderheap::*;
 
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Node(u32);
@@ -7,356 +7,231 @@ pub struct Node(u32);
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Edge(u32);
 
-pub struct IncrementalLongestPaths {
-    n_nodes: usize,
-    n_edges: usize,
-    edge_data: Vec<EdgeData>,
-    node_outgoing: Vec<SmallVec<[Edge; 4]>>,
-    node_incoming: Vec<SmallVec<[Edge; 4]>>,
-    node_location: Vec<u32>,
-    scratch: IncrPathsScratch,
-}
-
-struct IncrPathsScratch {
-    queue: BinaryHeap<(u32, u32)>,
-    affected: HashSet<u32>,
-    deque: VecDeque<u32>,
-}
-
 struct EdgeData {
-    start_node: Node,
-    end_node: Node,
-    length: u32,
-    is_activated: bool,
-    is_critical: bool,
+    source :i32,
+    target :u32,
+    distance :u32,
 }
 
-impl IncrementalLongestPaths {
+pub struct LongestPaths {
+    n_nodes :usize,
+    n_edges :usize,
+    edge_data :Vec<EdgeData>,
+    node_outgoing :Vec<SmallVec<[u32; 4]>>,
+    node_incoming :Vec<SmallVec<[u32; 4]>>,
+    node_updated_from :Vec<i32>,
+    values :Vec<u32>,
+
+    current_updates :Vec<(u32, u32)>, // node -> overwritten value
+    queue :OrderHeap,
+}
+
+impl LongestPaths {
     pub fn new() -> Self {
-        IncrementalLongestPaths {
+        LongestPaths {
             n_nodes: 0,
             n_edges: 0,
-            edge_data: Vec::new(),
+            edge_data :Vec::new(),
             node_outgoing: Vec::new(),
             node_incoming: Vec::new(),
-            node_location: Vec::new(),
-            scratch: IncrPathsScratch {
-                queue: BinaryHeap::new(),
-                affected: HashSet::new(),
-                deque: VecDeque::new(),
-            },
-        }
-    }
+            node_updated_from :Vec::new(),
+            values: Vec::new(),
 
-    pub fn value(&self, node: Node) -> u32 {
-        self.node_location[node.0 as usize]
+            current_updates: Vec::new(),
+            queue: OrderHeap::new(),
+        }
     }
 
     pub fn new_node(&mut self) -> Node {
-        let node = Node(self.n_nodes as u32);
+        let node = Node(self.n_nodes as u32 + 1);
         self.n_nodes += 1;
-        self.node_location.push(0);
-        self.node_incoming.push(SmallVec::new());
-        self.node_outgoing.push(SmallVec::new());
+        self.node_outgoing.push(Default::default());
+        self.node_incoming.push(Default::default());
+        self.node_updated_from.push(-1);
+        self.values.push(0);
         node
     }
 
-    pub fn new_edge(&mut self, a: Node, b: Node, l: u32) -> Edge {
+    pub fn new_edge(&mut self, a :Node, b :Node, l :u32) -> Edge {
         let edge = Edge(self.n_edges as u32);
         self.n_edges += 1;
-
         self.edge_data.push(EdgeData {
-            start_node: a,
-            end_node: b,
-            length: l,
-            is_activated: false,
-            is_critical: false,
+            source: -(a.0 as i32), // negative because it is disabled
+            target: b.0,
+            distance: l,
         });
-
-        self.node_outgoing[a.0 as usize].push(edge);
-        self.node_incoming[b.0 as usize].push(edge);
-
         edge
     }
 
-    fn update_path(&mut self, node: Node, update: &mut impl FnMut(Node, u32, u32)) {
-        let old_value = self.value(node);
-        let new_value = self.node_incoming[node.0 as usize]
-            .iter()
-            .filter_map(|e| {
-                let edge_data = &self.edge_data[e.0 as usize];
-                if !edge_data.is_activated {
-                    return None;
-                }
-                Some(self.value(edge_data.start_node) + edge_data.length)
-            })
-            .max()
-            .unwrap_or(0);
+    pub fn value(&self, node :Node) -> u32 { self.values[node.0 as usize] }
 
-        if old_value != new_value {
-            self.node_location[node.0 as usize] = new_value;
-            update(node, old_value, new_value);
-        }
-    }
+    pub fn enable_edge<'a>(&'a mut self, Edge(add_idx) :Edge, event :impl Fn(Node,u32,u32)) -> Result<(), CycleIterator<'a>> {
+        let edge = &mut self.edge_data[add_idx as usize];
 
-    pub fn deactivate(&mut self, edge: Edge, update: &mut impl FnMut(Node, u32, u32)) {
-        let _p = hprof::enter("disjunctive graph deactivate");
-        if !self.edge_data[edge.0 as usize].is_activated {
-            return;
+        let was_already_enabled = edge.source > 0;
+        if was_already_enabled {
+            return Ok(()); 
         }
-        self.edge_data[edge.0 as usize].is_activated = false;
-        if !self.edge_data[edge.0 as usize].is_critical {
-            return;
-        }
-        self.edge_data[edge.0 as usize].is_critical = false;
+        // Enable edge
+        edge.source *= -1;
 
-        let edge_data = &self.edge_data[edge.0 as usize];
-        let had_other_critical = self.node_incoming[edge_data.end_node.0 as usize]
-            .iter()
-            .any(|e| self.edge_data[e.0 as usize].is_critical);
-        if had_other_critical {
-            return;
+        let is_critical = self.values[edge.source as usize] + edge.distance < self.values[edge.target as usize];
+        if !is_critical {
+            return Ok(());
         }
 
-        // Compute affected set
-        self.scratch.affected.clear();
-        debug_assert!(self.scratch.deque.len() == 0);
-        self.scratch.deque.push_back(edge_data.end_node.0);
-        while let Some(node) = self.scratch.deque.pop_front() {
-            self.scratch.affected.insert(node);
-            for outgoing_edge in self.node_outgoing[node as usize].iter() {
-                let edge_data = &self.edge_data[outgoing_edge.0 as usize];
-                let next_node = edge_data.end_node;
-                if !edge_data.is_activated || !edge_data.is_critical {
-                    continue;
-                }
-                self.edge_data[outgoing_edge.0 as usize].is_critical = false;
-                let has_critical = self.node_incoming[next_node.0 as usize]
-                    .iter()
-                    .any(|e| self.edge_data[e.0 as usize].is_critical);
-                if !has_critical {
-                    self.scratch.deque.push_back(next_node.0);
-                }
-            }
-        }
-
-        let mut degreelp = self
-            .scratch
-            .affected
-            .iter()
-            .map(|n| {
-                let count = self.node_incoming[*n as usize]
-                    .iter()
-                    .filter(|e| {
-                        self.scratch
-                            .affected
-                            .contains(&self.edge_data[e.0 as usize].start_node.0)
-                    })
-                    .count() as u32;
-                (*n, count)
-            })
-            .collect::<HashMap<u32, u32>>();
-
-        debug_assert!(self.scratch.deque.len() == 0);
-        self.scratch
-            .deque
-            .extend(
-                degreelp
-                    .iter()
-                    .filter_map(|(n, d)| if *d == 0 { Some(*n) } else { None }),
-            );
-
-        while let Some(node) = self.scratch.deque.pop_front() {
-            debug_assert!(self.scratch.affected.contains(&node));
-            self.update_path(Node(node), update);
-
-            for e in self.node_incoming[node as usize].iter() {
-                let edge_data = &self.edge_data[e.0 as usize];
-                if !edge_data.is_activated {
-                    continue;
-                }
-                debug_assert!(edge_data.end_node.0 == node);
-                if self.value(edge_data.start_node) + edge_data.length
-                    == self.value(edge_data.end_node)
-                {
-                    self.edge_data[e.0 as usize].is_critical = true;
-                }
-            }
-
-            for e in self.node_outgoing[node as usize].iter() {
-                let edge_data = &self.edge_data[e.0 as usize];
-                if !edge_data.is_activated {
-                    continue;
-                }
-                *degreelp.get_mut(&edge_data.end_node.0).unwrap() -= 1;
-                if degreelp[&edge_data.end_node.0] == 0 {
-                    self.scratch.deque.push_back(edge_data.end_node.0);
-                }
-            }
-        }
-    }
-
-    pub fn activate(&mut self, edge: Edge, update: &mut impl FnMut(Node, u32, u32)) -> bool {
-        let _p = hprof::enter("disjunctive graph activate");
-        debug_assert!(self.scratch.queue.len() == 0);
-        if self.edge_data[edge.0 as usize].is_activated {
-            return true;
-        }
-        self.edge_data[edge.0 as usize].is_activated = true;
-
-        // TODO we need a trail of updates anyway for backtracking when cycles are detected.
-        // So we might put seen and visited as bit fields on edge_data, and then undo them
-        // when the function ends (at a cycle, at sum violation(?) or at success).
-        let mut seen = HashSet::new();
-        let mut visited = HashSet::new(); // needed only for cycle check. But cycle check can be simplified to visiting edge.start.
-
-        let edge_data = &self.edge_data[edge.0 as usize];
-        if self.value(edge_data.start_node) + edge_data.length > self.value(edge_data.end_node) {
-            self.scratch
-                .queue
-                .push((self.value(edge_data.end_node), edge_data.end_node.0));
-            while let Some((_, v)) = self.scratch.queue.pop() {
-                visited.insert(v);
-
-                // WRITE
-                self.update_path(Node(v), update);
-
-                for e in self.node_incoming[v as usize].iter() {
-                    let edge_data = &self.edge_data[e.0 as usize];
-                    debug_assert!(v == edge_data.end_node.0);
-                    if !edge_data.is_activated {
-                        continue;
-                    }
-                    let is_critical = self.value(edge_data.start_node) + edge_data.length
-                        == self.value(edge_data.end_node);
-                    // WRITE
-                    self.edge_data[e.0 as usize].is_critical = is_critical;
-                }
-
-                for e in self.node_outgoing[v as usize].iter() {
-                    let edge_data = &self.edge_data[e.0 as usize];
-                    debug_assert!(v == edge_data.start_node.0);
-                    if !edge_data.is_activated {
-                        continue;
-                    }
-
-                    if self.value(Node(v)) + edge_data.length > self.value(edge_data.end_node) {
-                        if !seen.contains(&edge_data.end_node.0) {
-                            seen.insert(edge_data.end_node.0);
-                            self.scratch
-                                .queue
-                                .push((self.value(edge_data.end_node), edge_data.end_node.0));
-                        } else if visited.contains(&edge_data.end_node.0) {
-                            panic!("cycle");
-                            return false;
-                        }
-                    } else if self.value(Node(v)) + edge_data.length
-                        == self.value(edge_data.end_node)
-                    {
-                        // WRITE
-                        self.edge_data[e.0 as usize].is_critical = true;
-                    }
-                }
-            }
-        } else if self.value(edge_data.start_node) + edge_data.length
-            == self.value(edge_data.end_node)
+        self.current_updates.clear();
+        debug_assert!(self.queue.is_empty());
         {
-            // WRITE (but will not backtrack from here, because it cannot fail)
-            self.edge_data[edge.0 as usize].is_critical = true;
-        } else {
-            // No need to do anything
+            let values = &self.values;
+            let edges = &self.edge_data;
+            self.queue.insert(add_idx as i32, |i| values[edges[*i as usize].target as usize] as i32);
         }
 
-        true
+        let mut updated_root = false;
+        while let Some(edge_idx) = {
+            let values = &self.values;
+            let edges = &self.edge_data;
+            self.queue.remove_min(|i| values[edges[*i as usize].target as usize] as i32)
+        } {
+            let edge = &self.edge_data[edge_idx as usize];
+            let target_updated = self.values[edge.source as usize] + edge.distance < self.values[edge.target as usize];
+
+            if target_updated {
+                if updated_root && edge_idx == add_idx as i32 {
+                    // Backtrack updated node values
+                    for (node,dist) in self.current_updates.iter().rev() {
+                        self.values[*node as usize] = *dist;
+                    }
+
+                    // Backtrack on constraint-active-flag
+                    self.edge_data[add_idx as usize].source *= -1;
+                    debug_assert!(self.edge_data[add_idx as usize].source < 0);
+
+                    // Return the cycle.
+                    return Err(CycleIterator { graph: self });
+                }
+
+                updated_root = true;
+                self.current_updates.push((edge.target, self.values[edge.target as usize]));
+                let old_value = self.values[edge.target as usize];
+                let new_value = self.values[edge.source as usize] + edge.distance;
+                self.values[edge.target as usize] = new_value;
+                event(Node(edge.target), old_value, new_value);
+
+                self.node_updated_from[edge.target as usize] = edge.source;
+
+                for next_edge_idx in self.node_outgoing[edge.target as usize].iter() {
+                    if self.edge_data[*next_edge_idx as usize].source < 0 { continue; }
+                    if self.queue.contains(*next_edge_idx as i32) { continue; }
+                    let values = &self.values;
+                    let edges = &self.edge_data;
+                    self.queue.insert(*next_edge_idx as i32,
+                                      |i| values[edges[*i as usize].target as usize] as i32);
+                }
+
+            }
+
+        }
+
+        Ok(())
     }
-}
 
-pub(crate) fn nonincremental_longest_paths(edges: &[(u32, u32, u32)]) -> HashMap<u32, u32> {
-    let mut pred: HashMap<u32, Vec<(u32, u32)>> = HashMap::new();
-    let mut succ: HashMap<u32, Vec<(u32, u32)>> = HashMap::new();
-    let mut visited: HashSet<u32> = HashSet::new();
-    let mut all_nodes: HashSet<u32> = HashSet::new();
-    for (a, b, l) in edges.iter() {
-        all_nodes.insert(*a);
-        all_nodes.insert(*b);
-        succ.entry(*a).or_insert(Vec::new()).push((*b, *l));
-        pred.entry(*b).or_insert(Vec::new()).push((*a, *l));
-    }
+    pub fn disable_edges(&mut self, edges :impl IntoIterator<Item = Edge>, event :impl Fn(Node, u32, u32)) {
 
-    let mut paths: HashMap<u32, u32> = HashMap::new();
-    let mut queue = all_nodes
-        .iter()
-        .filter(|x| pred.get(x).map(|preds| preds.len() == 0).unwrap_or(true))
-        .cloned()
-        .collect::<Vec<_>>();
+        debug_assert!(self.queue.is_empty());
 
-    while let Some(v) = queue.pop() {
-        visited.insert(v);
-        let new_path = pred
-            .get(&v)
-            .iter()
-            .flat_map(|x| x.iter())
-            .map(|(n, l)| paths[n] + l)
-            .max()
-            .unwrap();
-        paths.insert(v, new_path);
-        for (next_node, _) in succ.get(&v).iter().flat_map(|x| x.iter()) {
-            let is_ready = pred
-                .get(next_node)
-                .iter()
-                .flat_map(|x| x.iter())
-                .all(|(prev_node, _l)| visited.contains(prev_node));
-            if is_ready {
-                queue.push(*next_node);
+        // Add the edges-to-be-disabled to the heap.
+        for Edge(edge_idx) in edges.into_iter() {
+            let edge = &mut self.edge_data[edge_idx as usize];
+
+            // Was it already disabled?
+            let was_enabled = edge.source > 0;
+            if !was_enabled {
+                continue; 
+            }
+            edge.source *= -1;
+
+            let is_critical = self.values[edge.source as usize] + edge.distance < self.values[edge.target as usize];
+            if !is_critical {
+                continue;
+            }
+
+            if self.queue.contains(edge_idx as i32) { continue; }
+            let values = &self.values;
+            let edges = &self.edge_data;
+            self.queue.insert(edge_idx as i32, 
+                              |i| values[edges[*i as usize].target as usize] as i32);
+        }
+
+
+        while let Some(edge_idx) = {
+            let values = &self.values;
+            let edges = &self.edge_data;
+            self.queue.remove_min(|i| values[edges[*i as usize].target as usize] as i32)
+        } {
+            let edge = &self.edge_data[edge_idx as usize];
+
+            // The values should already be consistent with this edge.
+            debug_assert!(self.values[-edge.source as usize] + edge.distance <= self.values[edge.target as usize]);
+
+            let is_critical = self.node_updated_from[edge.target as usize] == edge_idx;
+            if is_critical {
+                let edge_min_value = self.values[-edge.source as usize] + edge.distance;
+                debug_assert!(edge_min_value == self.values[edge.target as usize]);
+
+                // Look backwards to find a critical edge
+                let mut critical_edge = None;
+                let mut critical_dist = 0;
+                for prev_edge_idx in self.node_incoming[edge.target as usize].iter() {
+                    let edge_data = &self.edge_data[*prev_edge_idx as usize];
+                    if edge_data.source < 0 { continue; }
+                    let new_value = self.values[edge_data.source as usize] + edge_data.distance;
+                    if new_value > critical_dist {
+                        critical_dist = new_value;
+                        critical_edge = Some(*prev_edge_idx);
+                    }
+                }
+
+                if let Some(critical_edge) = critical_edge {
+
+                    self.node_updated_from[edge.target as usize] = critical_edge as i32;
+
+                    debug_assert!(critical_dist <= self.values[edge.target as usize]);
+                    debug_assert!(self.edge_data[critical_edge as usize].source > 0);
+                    debug_assert!(self.edge_data[critical_edge as usize].target == edge.target);
+
+                    let target_updated = critical_dist < self.values[edge.target as usize];
+                    if target_updated {
+
+                        // Update the value
+                        let old_value = self.values[edge.target as usize];
+                        let new_value = critical_dist;
+                        debug_assert!(new_value < old_value);
+                        self.values[edge.target as usize] = new_value;
+                        event(Node(edge.target), old_value, new_value);
+
+                        // Add outgoing edges to the update queue.
+                        for next_edge_idx in self.node_outgoing[edge.target as usize].iter() {
+                            if self.edge_data[*next_edge_idx as usize].source < 0 { continue; }
+                            if self.queue.contains(*next_edge_idx as i32) { continue; }
+                            let values = &self.values;
+                            let edges = &self.edge_data;
+                            self.queue.insert(*next_edge_idx as i32,
+                                              |i| values[edges[*i as usize].target as usize] as i32);
+                        }
+                    }
+
+                } else {
+                    self.values[edge.target as usize] = 0;
+                    self.node_updated_from[edge.target as usize] = -1;
+                }
             }
         }
     }
-
-    paths
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    pub fn hello() {
-        let mut incr = IncrementalLongestPaths::new();
-        let nodes = (0..100).map(|x| incr.new_node()).collect::<Vec<_>>();
-    }
-
-    #[test]
-    pub fn test_activate() {
-        let mut incr = IncrementalLongestPaths::new();
-        let n1 = incr.new_node();
-        let n2 = incr.new_node();
-        assert!(incr.value(n1) == 0);
-        assert!(incr.value(n2) == 0);
-
-        let e1 = incr.new_edge(n1, n2, 5);
-        incr.activate(e1, &mut |_, _, _| {});
-        assert!(incr.value(n1) == 0);
-        assert!(incr.value(n2) == 5);
-
-        let e2 = incr.new_edge(n1, n2, 6);
-        incr.activate(e2, &mut |_, _, _| {});
-        assert!(incr.value(n1) == 0);
-        assert!(incr.value(n2) == 6);
-
-        incr.deactivate(e2, &mut |_, _, _| {});
-        assert!(incr.value(n1) == 0);
-        assert!(incr.value(n2) == 5);
-    }
-
-    #[test]
-    pub fn test_cycle() {
-        let mut incr = IncrementalLongestPaths::new();
-        let n1 = incr.new_node();
-        let n2 = incr.new_node();
-
-        let e1 = incr.new_edge(n1, n2, 1);
-        incr.activate(e1, &mut |_, _, _| {});
-        let e2 = incr.new_edge(n2, n1, 1);
-        incr.activate(e2, &mut |_, _, _| {});
-    }
+pub struct CycleIterator<'a> {
+   graph :&'a LongestPaths,
 }
+

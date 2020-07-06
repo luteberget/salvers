@@ -14,7 +14,7 @@ pub struct IntVar(Node);
 
 struct SchedulingTheory {
     conditions: HashMap<Lit, Edge>, // Map from bool variable to edge
-    graph: IncrementalLongestPaths,
+    graph: LongestPaths,
 
     #[cfg(debug_assertions)]
     requires_backtrack: bool,
@@ -29,7 +29,7 @@ impl SchedulingTheory {
             conditions: HashMap::new(),
             #[cfg(debug_assertions)]
             requires_backtrack: false,
-            graph: IncrementalLongestPaths::new(),
+            graph: LongestPaths::new(),
             trail: Vec::new(),
             trail_lim: Vec::new(),
         }
@@ -57,11 +57,12 @@ impl SchedulingTheory {
 
     fn enable(&mut self, e: Edge) -> bool {
         let _p = hprof::enter("scheduling enable");
-        let activated = self.graph.activate(e, &mut |_, _, _| {});
-        if activated {
-            self.trail.push(e);
-        }
-        activated
+        todo!()
+        //let activated = self.graph.activate(e, &mut |_, _, _| {});
+        //if activated {
+        //    self.trail.push(e);
+        //}
+        //activated
     }
 }
 
@@ -72,18 +73,19 @@ impl Theory for SchedulingTheory {
 
         for lit in lits {
             if let Some(edge_idx) = self.conditions.get(lit) {
-                if !self.graph.activate(*edge_idx, &mut |_, _, _| {}) {
-                    //buf.add_clause(self.graph.conflict.iter())
+                todo!()
+                //if !self.graph.activate(*edge_idx, &mut |_, _, _| {}) {
+                //    //buf.add_clause(self.graph.conflict.iter())
 
-                    #[cfg(debug_assertions)]
-                    {
-                        self.requires_backtrack = true;
-                    }
+                //    #[cfg(debug_assertions)]
+                //    {
+                //        self.requires_backtrack = true;
+                //    }
 
-                    return;
-                } else {
-                    self.trail.push(*edge_idx);
-                }
+                //    return;
+                //} else {
+                //    self.trail.push(*edge_idx);
+                //}
             } else {
                 println!("irrelevant lit {:?}", lit);
             }
@@ -106,7 +108,8 @@ impl Theory for SchedulingTheory {
             }
 
             for edge in self.trail.drain(self.trail_lim[level as usize]..) {
-                self.graph.deactivate(edge, &mut |_, _, _| {});
+                todo!()
+                //self.graph.deactivate(edge, &mut |_, _, _| {});
             }
 
             self.trail_lim.truncate(level as usize);
