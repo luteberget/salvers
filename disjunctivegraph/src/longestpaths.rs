@@ -194,7 +194,10 @@ impl LongestPaths {
         debug_assert!(self.queue.is_empty());
 
         // Add the edges-to-be-disabled to the heap.
+let mut i = 0;
+let mut j = 0;
         for Edge(edge_idx) in edges.into_iter() {
+i += 1;
             let edge = &mut self.edge_data[edge_idx as usize];
 
             // Was it already disabled?
@@ -218,10 +221,13 @@ impl LongestPaths {
             let values = &self.values;
             let edges = &self.edge_data;
             println!("adding to queue {:?}", edge_idx);
+j += 1;
             self.queue.insert(edge_idx as i32, |i| {
                 values[edges[*i as usize].target as usize] as i32
             });
         }
+
+println!("disabling {}/{} edges", j, i);
 
         while let Some(edge_idx) = {
             let values = &self.values;
@@ -242,9 +248,10 @@ impl LongestPaths {
                 "popping heap: is edge {:?} critical: {:?}",
                 edge, is_critical
             );
-            println!("node updated from: {:?}", self.node_updated_from);
+            println!("  node updated from: {:?}", self.node_updated_from);
+            println!("  values: {:?}", self.values);
             if is_critical {
-                let edge_min_value = self.values[edge.source.abs() as usize] + edge.distance;
+                //let edge_min_value = self.values[edge.source.abs() as usize] + edge.distance;
 
                 // This assertion is wrong, because the source node might be further back than it
                 // used to be when the node_updated_from pointer was set.
@@ -279,6 +286,7 @@ impl LongestPaths {
                         let new_value = critical_dist;
                         debug_assert!(new_value < old_value);
                         self.values[edge.target as usize] = new_value;
+                        println!("disable: setting {:?} from {} to {}", Node(edge.target), old_value, new_value);
                         event(Node(edge.target), old_value, new_value);
 
                         // Add outgoing edges to the update queue.
@@ -302,6 +310,7 @@ impl LongestPaths {
                 }
             }
         }
+            println!("  disable-final-values: {:?}", self.values);
     }
 }
 
@@ -371,7 +380,7 @@ mod tests {
         let n3 = lp.new_node();
 
         let e1 = lp.new_edge(n1, n2, 5);
-        let e2 = lp.new_edge(n2, n3, 5);
+        let _e2 = lp.new_edge(n2, n3, 5);
         let e3 = lp.new_edge(n1, n3, 6);
         let e4 = lp.new_edge(n3, n1, 1);
 
@@ -453,7 +462,7 @@ mod tests {
         assert!(lp.value(n1) == 0);
         assert!(lp.value(n2) == 5);
         assert!(lp.value(n3) == 10);
-        lp.enable_edge(e3);
+        assert!(lp.enable_edge(e3).is_ok());
         lp.disable_edges(Some(e2));
         println!("values {:?}", lp.values);
         assert!(lp.value(n1) == 0);
@@ -462,4 +471,31 @@ mod tests {
 
         println!("parents: {:?}", lp.node_updated_from);
     }
+
+    #[test]
+    fn remove_root() {
+        let mut lp = LongestPaths::new();
+        let n1 = lp.new_node();
+        let n2 = lp.new_node();
+        let n3 = lp.new_node();
+        let n4 = lp.new_node();
+
+        let e1 = lp.new_edge(n1, n2, 5);
+        let e2 = lp.new_edge(n2, n3, 5);
+        let e3 = lp.new_edge(n3, n4, 5);
+
+        for e in vec![e1,e2,e3] { assert!(lp.enable_edge(e).is_ok()); } 
+        assert_eq!(lp.value(n1), 0);
+        assert_eq!(lp.value(n2), 5);
+        assert_eq!(lp.value(n3), 10);
+        assert_eq!(lp.value(n4), 15);
+
+        lp.disable_edges(Some(e1));
+        assert_eq!(lp.value(n1), 0);
+        assert_eq!(lp.value(n2), 0);
+        assert_eq!(lp.value(n3), 5);
+        assert_eq!(lp.value(n4), 10);
+
+    }
+
 }

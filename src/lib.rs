@@ -1176,7 +1176,7 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     fn cancel_until(&mut self, level: i32) {
-        trace!(" --> CANCEL_UNTIL(level={})", level);
+        println!(" --> CANCEL_UNTIL(level={})", level);
         if self.trail_lim.len() > level as usize {
             let mut c = (self.trail.len() - 1) as i32;
             while c >= self.trail_lim[level as usize] {
@@ -2105,7 +2105,10 @@ impl<Th: Theory> DplltSolver<Th> {
                 }
                 i = self.theory_refinement_buffer.next_idx(i);
             }
-            self.cancel_until(backtrack_level);
+
+	    if backtrack_level < self.trail_lim.len() as i32 {
+              self.cancel_until(backtrack_level);
+            }
         }
 
         // third pass: attach clauses and enqueue propagations, determine conflict clause

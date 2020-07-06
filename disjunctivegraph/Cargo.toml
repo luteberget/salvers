@@ -11,3 +11,7 @@ smallvec = "1.4"
 sattrait = { path = "../sattrait" }
 mysatsolver = { path = ".." }
 hprof = "0.1"
+
+[dev-dependencies]
+itertools = "0.9"
+rc2 = { path = "../rc2" }
