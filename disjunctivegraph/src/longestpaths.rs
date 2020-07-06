@@ -1,5 +1,5 @@
-use smallvec::*;
 use crate::orderheap::*;
+use smallvec::*;
 
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Node(u32);
@@ -9,22 +9,22 @@ pub struct Edge(u32);
 
 #[derive(Debug)]
 struct EdgeData {
-    source :i32,
-    target :u32,
-    distance :u32,
+    source: i32,
+    target: u32,
+    distance: u32,
 }
 
 pub struct LongestPaths {
-    n_nodes :usize,
-    n_edges :usize,
-    edge_data :Vec<EdgeData>,
-    node_outgoing :Vec<SmallVec<[u32; 4]>>,
-    node_incoming :Vec<SmallVec<[u32; 4]>>,
-    node_updated_from :Vec<i32>,
-    values :Vec<u32>,
+    n_nodes: usize,
+    n_edges: usize,
+    edge_data: Vec<EdgeData>,
+    node_outgoing: Vec<SmallVec<[u32; 4]>>,
+    node_incoming: Vec<SmallVec<[u32; 4]>>,
+    node_updated_from: Vec<i32>,
+    values: Vec<u32>,
 
-    current_updates :Vec<(u32, u32)>, // node -> overwritten value
-    queue :OrderHeap,
+    current_updates: Vec<(u32, u32)>, // node -> overwritten value
+    queue: OrderHeap,
 }
 
 impl LongestPaths {
@@ -32,10 +32,10 @@ impl LongestPaths {
         let mut p = LongestPaths {
             n_nodes: 0,
             n_edges: 0,
-            edge_data :Vec::new(),
+            edge_data: Vec::new(),
             node_outgoing: Vec::new(),
             node_incoming: Vec::new(),
-            node_updated_from :Vec::new(),
+            node_updated_from: Vec::new(),
             values: Vec::new(),
 
             current_updates: Vec::new(),
@@ -55,7 +55,7 @@ impl LongestPaths {
         node
     }
 
-    pub fn new_edge(&mut self, a :Node, b :Node, l :u32) -> Edge {
+    pub fn new_edge(&mut self, a: Node, b: Node, l: u32) -> Edge {
         let edge = Edge(self.n_edges as u32);
         self.n_edges += 1;
         self.edge_data.push(EdgeData {
@@ -63,33 +63,40 @@ impl LongestPaths {
             target: b.0,
             distance: l,
         });
-	self.node_outgoing[a.0 as usize].push(edge.0);
-	self.node_incoming[b.0 as usize].push(edge.0);
+        self.node_outgoing[a.0 as usize].push(edge.0);
+        self.node_incoming[b.0 as usize].push(edge.0);
         edge
     }
 
-    pub fn value(&self, node :Node) -> u32 { self.values[node.0 as usize] }
+    pub fn value(&self, node: Node) -> u32 {
+        self.values[node.0 as usize]
+    }
 
-    pub fn critical_path<'a>(&'a self, node :Node) -> impl Iterator<Item = Edge> + 'a {
+    pub fn critical_path<'a>(&'a self, node: Node) -> impl Iterator<Item = Edge> + 'a {
         CriticalPathIterator { graph: self, node }
     }
 
-    pub fn enable_edge<'a>(&'a mut self, edge :Edge) -> Result<(), CycleIterator<'a>> {
-        self.enable_edge_cb(edge, |_,_,_| {})
+    pub fn enable_edge<'a>(&'a mut self, edge: Edge) -> Result<(), CycleIterator<'a>> {
+        self.enable_edge_cb(edge, |_, _, _| {})
     }
 
-    pub fn enable_edge_cb<'a>(&'a mut self, Edge(add_idx) :Edge, event :impl Fn(Node,u32,u32)) -> Result<(), CycleIterator<'a>> {
+    pub fn enable_edge_cb<'a>(
+        &'a mut self,
+        Edge(add_idx): Edge,
+        mut event: impl FnMut(Node, u32, u32),
+    ) -> Result<(), CycleIterator<'a>> {
         let edge = &mut self.edge_data[add_idx as usize];
 
         let was_already_enabled = edge.source > 0;
         if was_already_enabled {
             println!("enable_edge: was already enabled");
-            return Ok(()); 
+            return Ok(());
         }
         // Enable edge
         edge.source *= -1;
 
-        let is_critical = self.values[edge.source as usize] + edge.distance > self.values[edge.target as usize];
+        let is_critical =
+            self.values[edge.source as usize] + edge.distance > self.values[edge.target as usize];
         if !is_critical {
             println!("enable_edge: was not critical");
             println!(" edge: {:?}", edge);
@@ -103,23 +110,27 @@ impl LongestPaths {
         {
             let values = &self.values;
             let edges = &self.edge_data;
-            self.queue.insert(add_idx as i32, |i| values[edges[*i as usize].target as usize] as i32);
+            self.queue.insert(add_idx as i32, |i| {
+                values[edges[*i as usize].target as usize] as i32
+            });
         }
 
         let mut updated_root = false;
         while let Some(edge_idx) = {
             let values = &self.values;
             let edges = &self.edge_data;
-            self.queue.remove_min(|i| values[edges[*i as usize].target as usize] as i32)
+            self.queue
+                .remove_min(|i| values[edges[*i as usize].target as usize] as i32)
         } {
             let edge = &self.edge_data[edge_idx as usize];
             println!("Enabling edge {:?}", edge);
-            let target_updated = self.values[edge.source as usize] + edge.distance > self.values[edge.target as usize];
+            let target_updated = self.values[edge.source as usize] + edge.distance
+                > self.values[edge.target as usize];
 
             if target_updated {
                 if updated_root && edge_idx == add_idx as i32 {
                     // Backtrack updated node values
-                    for (node,dist) in self.current_updates.iter().rev() {
+                    for (node, dist) in self.current_updates.iter().rev() {
                         self.values[*node as usize] = *dist;
                     }
 
@@ -129,41 +140,57 @@ impl LongestPaths {
 
                     // Return the cycle.
                     let node = Node(self.edge_data[add_idx as usize].target);
-                    return Err(CycleIterator { graph: self, node: Some(node), start_node: node });
+                    return Err(CycleIterator {
+                        graph: self,
+                        node: Some(node),
+                        start_node: node,
+                    });
                 }
 
                 updated_root = true;
-                self.current_updates.push((edge.target, self.values[edge.target as usize]));
+                self.current_updates
+                    .push((edge.target, self.values[edge.target as usize]));
                 let old_value = self.values[edge.target as usize];
                 let new_value = self.values[edge.source as usize] + edge.distance;
                 self.values[edge.target as usize] = new_value;
-		println!("enable: setting {:?} from {} to {}", Node(edge.target), old_value, new_value);
+                println!(
+                    "enable: setting {:?} from {} to {}",
+                    Node(edge.target),
+                    old_value,
+                    new_value
+                );
                 event(Node(edge.target), old_value, new_value);
 
                 self.node_updated_from[edge.target as usize] = edge_idx;
 
                 for next_edge_idx in self.node_outgoing[edge.target as usize].iter() {
-                    if self.edge_data[*next_edge_idx as usize].source < 0 { continue; }
-                    if self.queue.contains(*next_edge_idx as i32) { continue; }
+                    if self.edge_data[*next_edge_idx as usize].source < 0 {
+                        continue;
+                    }
+                    if self.queue.contains(*next_edge_idx as i32) {
+                        continue;
+                    }
                     let values = &self.values;
                     let edges = &self.edge_data;
-                    self.queue.insert(*next_edge_idx as i32,
-                                      |i| values[edges[*i as usize].target as usize] as i32);
+                    self.queue.insert(*next_edge_idx as i32, |i| {
+                        values[edges[*i as usize].target as usize] as i32
+                    });
                 }
-
             }
-
         }
 
         Ok(())
     }
 
-    pub fn disable_edges(&mut self, edges :impl IntoIterator<Item = Edge>) {
-        self.disable_edges_cb(edges, |_,_,_| {})
+    pub fn disable_edges(&mut self, edges: impl IntoIterator<Item = Edge>) {
+        self.disable_edges_cb(edges, |_, _, _| {})
     }
 
-    pub fn disable_edges_cb(&mut self, edges :impl IntoIterator<Item = Edge>, event :impl Fn(Node, u32, u32)) {
-
+    pub fn disable_edges_cb(
+        &mut self,
+        edges: impl IntoIterator<Item = Edge>,
+        mut event: impl FnMut(Node, u32, u32),
+    ) {
         debug_assert!(self.queue.is_empty());
 
         // Add the edges-to-be-disabled to the heap.
@@ -174,38 +201,47 @@ impl LongestPaths {
             let was_enabled = edge.source > 0;
             if !was_enabled {
                 println!("disable {:?}: was already enabled", edge_idx);
-                continue; 
+                continue;
             }
             edge.source *= -1;
 
-            let is_not_critical = self.values[-edge.source as usize] + edge.distance < self.values[edge.target as usize];
+            let is_not_critical = self.values[-edge.source as usize] + edge.distance
+                < self.values[edge.target as usize];
             if is_not_critical {
                 println!("disable {:?}: was not critical", edge_idx);
                 continue;
             }
 
-            if self.queue.contains(edge_idx as i32) { continue; }
+            if self.queue.contains(edge_idx as i32) {
+                continue;
+            }
             let values = &self.values;
             let edges = &self.edge_data;
             println!("adding to queue {:?}", edge_idx);
-            self.queue.insert(edge_idx as i32, 
-                              |i| values[edges[*i as usize].target as usize] as i32);
+            self.queue.insert(edge_idx as i32, |i| {
+                values[edges[*i as usize].target as usize] as i32
+            });
         }
-
-
 
         while let Some(edge_idx) = {
             let values = &self.values;
             let edges = &self.edge_data;
-            self.queue.remove_min(|i| values[edges[*i as usize].target as usize] as i32)
+            self.queue
+                .remove_min(|i| values[edges[*i as usize].target as usize] as i32)
         } {
             let edge = &self.edge_data[edge_idx as usize];
 
             // The values should already be consistent with this edge.
-            debug_assert!(self.values[edge.source.abs() as usize] + edge.distance <= self.values[edge.target as usize]);
+            debug_assert!(
+                self.values[edge.source.abs() as usize] + edge.distance
+                    <= self.values[edge.target as usize]
+            );
 
             let is_critical = self.node_updated_from[edge.target as usize] == edge_idx;
-            println!("popping heap: is edge {:?} critical: {:?}", edge, is_critical);
+            println!(
+                "popping heap: is edge {:?} critical: {:?}",
+                edge, is_critical
+            );
             println!("node updated from: {:?}", self.node_updated_from);
             if is_critical {
                 let edge_min_value = self.values[edge.source.abs() as usize] + edge.distance;
@@ -219,7 +255,9 @@ impl LongestPaths {
                 let mut critical_dist = 0;
                 for prev_edge_idx in self.node_incoming[edge.target as usize].iter() {
                     let edge_data = &self.edge_data[*prev_edge_idx as usize];
-                    if edge_data.source < 0 { continue; }
+                    if edge_data.source < 0 {
+                        continue;
+                    }
                     let new_value = self.values[edge_data.source as usize] + edge_data.distance;
                     if new_value > critical_dist {
                         critical_dist = new_value;
@@ -228,7 +266,6 @@ impl LongestPaths {
                 }
 
                 if let Some(critical_edge) = critical_edge {
-
                     self.node_updated_from[edge.target as usize] = critical_edge as i32;
 
                     debug_assert!(critical_dist <= self.values[edge.target as usize]);
@@ -237,7 +274,6 @@ impl LongestPaths {
 
                     let target_updated = critical_dist < self.values[edge.target as usize];
                     if target_updated {
-
                         // Update the value
                         let old_value = self.values[edge.target as usize];
                         let new_value = critical_dist;
@@ -247,15 +283,19 @@ impl LongestPaths {
 
                         // Add outgoing edges to the update queue.
                         for next_edge_idx in self.node_outgoing[edge.target as usize].iter() {
-                            if self.edge_data[*next_edge_idx as usize].source < 0 { continue; }
-                            if self.queue.contains(*next_edge_idx as i32) { continue; }
+                            if self.edge_data[*next_edge_idx as usize].source < 0 {
+                                continue;
+                            }
+                            if self.queue.contains(*next_edge_idx as i32) {
+                                continue;
+                            }
                             let values = &self.values;
                             let edges = &self.edge_data;
-                            self.queue.insert(*next_edge_idx as i32,
-                                              |i| values[edges[*i as usize].target as usize] as i32);
+                            self.queue.insert(*next_edge_idx as i32, |i| {
+                                values[edges[*i as usize].target as usize] as i32
+                            });
                         }
                     }
-
                 } else {
                     self.values[edge.target as usize] = 0;
                     self.node_updated_from[edge.target as usize] = -1;
@@ -266,11 +306,10 @@ impl LongestPaths {
 }
 
 pub struct CycleIterator<'a> {
-   graph :&'a LongestPaths,
-   start_node :Node,
-   node :Option<Node>,
+    graph: &'a LongestPaths,
+    start_node: Node,
+    node: Option<Node>,
 }
-
 
 impl<'a> Iterator for CycleIterator<'a> {
     type Item = Edge;
@@ -280,7 +319,7 @@ impl<'a> Iterator for CycleIterator<'a> {
             let edge_idx = self.graph.node_updated_from[node.0 as usize];
             let edge = &self.graph.edge_data[edge_idx as usize];
             //debug_assert!(edge.source > 0);
-            if edge.source.abs() == self.start_node.0 as i32  {
+            if edge.source.abs() == self.start_node.0 as i32 {
                 // Iterator done
                 self.node = None;
             } else {
@@ -301,8 +340,8 @@ impl<'a> Iterator for CycleIterator<'a> {
 //
 
 pub struct CriticalPathIterator<'a> {
-    graph :&'a LongestPaths,
-    node :Node,
+    graph: &'a LongestPaths,
+    node: Node,
 }
 
 impl<'a> Iterator for CriticalPathIterator<'a> {
@@ -318,9 +357,7 @@ impl<'a> Iterator for CriticalPathIterator<'a> {
             Some(Edge(edge_idx as u32))
         }
     }
-
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -341,11 +378,12 @@ mod tests {
         assert!(lp.enable_edge(e1).is_ok());
         assert!(lp.enable_edge(e4).is_ok());
         if let Err(cycle) = lp.enable_edge(e3) {
-	  let cycle = cycle.collect::<Vec<_>>();
-          assert_eq!(cycle, vec![e3,e4]);
-        } else { panic!(); }
-
-     }
+            let cycle = cycle.collect::<Vec<_>>();
+            assert_eq!(cycle, vec![e3, e4]);
+        } else {
+            panic!();
+        }
+    }
 
     #[test]
     fn basic() {
@@ -377,15 +415,18 @@ mod tests {
         assert!(lp.value(n1) == 0);
         assert!(lp.value(n2) == 5);
         assert!(lp.value(n3) == 10);
-        println!("critical path from n3 {:?}", lp.critical_path(n3).collect::<Vec<_>>());
-        assert!(lp.critical_path(n3).collect::<Vec<_>>() == vec![e2,e1]);
+        println!(
+            "critical path from n3 {:?}",
+            lp.critical_path(n3).collect::<Vec<_>>()
+        );
+        assert!(lp.critical_path(n3).collect::<Vec<_>>() == vec![e2, e1]);
 
         assert!(lp.enable_edge(e3).is_ok());
         assert!(lp.value(n1) == 0);
         assert!(lp.value(n2) == 5);
         assert!(lp.value(n3) == 10);
 
-        lp.disable_edges(vec![e1,e2,e3]);
+        lp.disable_edges(vec![e1, e2, e3]);
         assert!(lp.value(n1) == 0);
         assert!(lp.value(n2) == 0);
         assert!(lp.value(n3) == 0);
@@ -400,10 +441,10 @@ mod tests {
         assert!(lp.value(n2) == 0);
         assert!(lp.value(n3) == 6);
 
-	println!("X");
-	println!("values {:?}", lp.values);
+        println!("X");
+        println!("values {:?}", lp.values);
         assert!(lp.enable_edge(e1).is_ok());
-	println!("values {:?}", lp.values);
+        println!("values {:?}", lp.values);
         assert!(lp.value(n1) == 0);
         assert!(lp.value(n2) == 5);
         assert!(lp.value(n3) == 10);
@@ -418,11 +459,7 @@ mod tests {
         assert!(lp.value(n1) == 0);
         assert!(lp.value(n2) == 5);
         assert!(lp.value(n3) == 6);
-   
-
 
         println!("parents: {:?}", lp.node_updated_from);
-
-
     }
 }

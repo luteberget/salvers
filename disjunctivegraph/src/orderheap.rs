@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn basic() {
         let mut heap = OrderHeap::new();
-        let values = vec![9,8,7,6,5,4,3,2,1];
+        let values = vec![9, 8, 7, 6, 5, 4, 3, 2, 1];
 
         let v = heap.remove_min(|i| values[*i as usize]);
         assert_eq!(None, v);
@@ -134,6 +134,5 @@ mod tests {
         assert_eq!(Some(0), v);
         let v = heap.remove_min(|i| values[*i as usize]);
         assert_eq!(None, v);
-
     }
 }
