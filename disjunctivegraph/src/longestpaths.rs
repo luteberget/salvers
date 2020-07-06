@@ -63,6 +63,8 @@ impl LongestPaths {
             target: b.0,
             distance: l,
         });
+	self.node_outgoing[a.0 as usize].push(edge.0);
+	self.node_incoming[b.0 as usize].push(edge.0);
         edge
     }
 
@@ -135,6 +137,7 @@ impl LongestPaths {
                 let old_value = self.values[edge.target as usize];
                 let new_value = self.values[edge.source as usize] + edge.distance;
                 self.values[edge.target as usize] = new_value;
+		println!("enable: setting {:?} from {} to {}", Node(edge.target), old_value, new_value);
                 event(Node(edge.target), old_value, new_value);
 
                 self.node_updated_from[edge.target as usize] = edge_idx;
@@ -276,12 +279,12 @@ impl<'a> Iterator for CycleIterator<'a> {
         if let Some(node) = self.node {
             let edge_idx = self.graph.node_updated_from[node.0 as usize];
             let edge = &self.graph.edge_data[edge_idx as usize];
-            debug_assert!(edge.source > 0);
-            if edge.source == self.start_node.0 as i32  {
+            //debug_assert!(edge.source > 0);
+            if edge.source.abs() == self.start_node.0 as i32  {
                 // Iterator done
                 self.node = None;
             } else {
-                self.node = Some(Node(edge.source as u32));
+                self.node = Some(Node(edge.source.abs() as u32));
             }
             Some(Edge(edge_idx as u32))
         } else {
@@ -324,7 +327,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn basic() {
+    fn cycle() {
         let mut lp = LongestPaths::new();
         let n1 = lp.new_node();
         let n2 = lp.new_node();
@@ -335,6 +338,25 @@ mod tests {
         let e3 = lp.new_edge(n1, n3, 6);
         let e4 = lp.new_edge(n3, n1, 1);
 
+        assert!(lp.enable_edge(e1).is_ok());
+        assert!(lp.enable_edge(e4).is_ok());
+        if let Err(cycle) = lp.enable_edge(e3) {
+	  let cycle = cycle.collect::<Vec<_>>();
+          assert_eq!(cycle, vec![e3,e4]);
+        } else { panic!(); }
+
+     }
+
+    #[test]
+    fn basic() {
+        let mut lp = LongestPaths::new();
+        let n1 = lp.new_node();
+        let n2 = lp.new_node();
+        let n3 = lp.new_node();
+
+        let e1 = lp.new_edge(n1, n2, 5);
+        let e2 = lp.new_edge(n2, n3, 5);
+        let e3 = lp.new_edge(n1, n3, 6);
 
         assert!(lp.value(n1) == 0);
         assert!(lp.value(n2) == 0);
@@ -363,10 +385,41 @@ mod tests {
         assert!(lp.value(n2) == 5);
         assert!(lp.value(n3) == 10);
 
-        lp.disable_edges(vec![e1,e2,e3,e4]);
+        lp.disable_edges(vec![e1,e2,e3]);
         assert!(lp.value(n1) == 0);
         assert!(lp.value(n2) == 0);
         assert!(lp.value(n3) == 0);
+
+        assert!(lp.enable_edge(e3).is_ok());
+        assert!(lp.value(n1) == 0);
+        assert!(lp.value(n2) == 0);
+        assert!(lp.value(n3) == 6);
+
+        assert!(lp.enable_edge(e2).is_ok());
+        assert!(lp.value(n1) == 0);
+        assert!(lp.value(n2) == 0);
+        assert!(lp.value(n3) == 6);
+
+	println!("X");
+	println!("values {:?}", lp.values);
+        assert!(lp.enable_edge(e1).is_ok());
+	println!("values {:?}", lp.values);
+        assert!(lp.value(n1) == 0);
+        assert!(lp.value(n2) == 5);
+        assert!(lp.value(n3) == 10);
+
+        lp.disable_edges(Some(e3));
+        assert!(lp.value(n1) == 0);
+        assert!(lp.value(n2) == 5);
+        assert!(lp.value(n3) == 10);
+        lp.enable_edge(e3);
+        lp.disable_edges(Some(e2));
+        println!("values {:?}", lp.values);
+        assert!(lp.value(n1) == 0);
+        assert!(lp.value(n2) == 5);
+        assert!(lp.value(n3) == 6);
+   
+
 
         println!("parents: {:?}", lp.node_updated_from);
 
