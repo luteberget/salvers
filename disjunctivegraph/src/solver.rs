@@ -1,14 +1,31 @@
 use crate::longestpaths::*;
-
 pub use mysatsolver::Lit;
 use mysatsolver::*;
-//use sattrait;
-//use smallvec::SmallVec;
+use smallvec::SmallVec;
 use std::collections::HashMap;
 
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 /// Integer variable for use in scheduling constraints (see `SchedulingSolver`).
 pub struct IntVar(Node);
+
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+/// Integer variable for use in scheduling constraints (see `SchedulingSolver`).
+pub struct SumRef(usize);
+
+impl SumRef {
+  fn idx(&self) -> usize { self.0 }
+}
+
+struct NodeSumRef {
+    sum :SumRef,
+    coeff: i32,
+}
+
+struct Sum {
+    lit :Lit,
+    bound: u32,
+    current_value :i32,
+}
 
 struct SchedulingTheory {
     condition_edge: HashMap<Lit, Edge>, // Map from bool variable to edge
@@ -21,6 +38,9 @@ struct SchedulingTheory {
     model: Option<Values>,
     invalidate_model: bool,
 
+    sum_constraints: Vec<Sum>,
+    node_constraints: Vec<SmallVec<[NodeSumRef; 4]>>,
+
     trail: Vec<Edge>,
     trail_lim: Vec<usize>,
 }
@@ -29,20 +49,29 @@ impl SchedulingTheory {
     fn new() -> Self {
         SchedulingTheory {
             condition_edge: HashMap::new(),
-            edge_condition :HashMap::new(),
+            edge_condition: HashMap::new(),
             #[cfg(debug_assertions)]
             requires_backtrack: false,
-	    model: None,
+            model: None,
             invalidate_model: false,
+
+            sum_constraints: Vec::new(),
+            node_constraints: Vec::new(),
+
             graph: LongestPaths::new(),
             trail: Vec::new(),
             trail_lim: Vec::new(),
         }
     }
 
+
     fn new_int(&mut self) -> IntVar {
-	assert!(self.trail_lim.len() == 0);
-        IntVar(self.graph.new_node())
+        assert!(self.trail_lim.len() == 0);
+        let node = self.graph.new_node();
+        while self.node_constraints.len() <= node.idx() {
+          self.node_constraints.push(Default::default());
+        }
+        IntVar(node)
     }
 
     fn add_diff(
@@ -53,14 +82,21 @@ impl SchedulingTheory {
         length: i32,
     ) -> bool {
         let _p = hprof::enter("add scheduling constraint");
-	assert!(self.trail_lim.len() == 0);
+        assert!(self.trail_lim.len() == 0);
         let edge = self.graph.new_edge(x, y, length);
         if let Some(lit) = lit {
             self.condition_edge.insert(lit, edge);
             self.edge_condition.insert(edge, lit);
             true
         } else {
-            let result = self.graph.enable_edge(edge).is_ok();
+            let (node_constraints, sum_constraints) = (&mut self.node_constraints, &mut self.sum_constraints);
+            let result = self.graph.enable_edge_cb(edge, |node,old,new| {
+              for component in node_constraints[node.idx()].iter() {
+                let sum = &mut sum_constraints[component.sum.idx()];
+                let value_diff = component.coeff * (new - old);
+                sum.current_value += value_diff;
+              }
+            }).is_ok();
             result
         }
     }
@@ -72,42 +108,40 @@ impl Theory for SchedulingTheory {
         assert!(!self.requires_backtrack);
 
         if self.invalidate_model {
-           self.invalidate_model = false;
-           self.model = None;
-	}
+            self.invalidate_model = false;
+            self.model = None;
+        }
 
         for lit in lits {
             if let Some(edge) = self.condition_edge.get(lit) {
-              if let Err(cycle) = self.graph.enable_edge(*edge) {
+                if let Err(cycle) = self.graph.enable_edge(*edge) {
+                    let map = &self.edge_condition;
+                    let cycle = cycle.filter_map(|edge| map.get(&edge)).map(|lit| !*lit);
 
-                let map = &self.edge_condition;
-                let cycle = cycle.filter_map(|edge| map.get(&edge)).map(|lit| !*lit);
+                    buf.add_clause(cycle);
 
-                buf.add_clause(cycle);
+                    #[cfg(debug_assertions)]
+                    {
+                        self.requires_backtrack = true;
+                    }
 
-                #[cfg(debug_assertions)]
-                {
-                    self.requires_backtrack = true;
+                    return;
+                } else {
+                    self.trail.push(*edge);
                 }
-
-                return;
-
-              } else {
-                self.trail.push(*edge);
-              }
             } else {
                 println!("irrelevant lit {:?}", lit);
             }
         }
 
         if let Check::Final = ch {
-          // If we get here, the problem is SAT, so we preserve the model before backtracking.
-          println!("Theory: FINAL SAT");
-	  if !self.model.is_some() {
-            println!("extracting values");
-            self.model = Some(self.graph.all_values());
-	  }
-	}
+            // If we get here, the problem is SAT, so we preserve the model before backtracking.
+            println!("Theory: FINAL SAT");
+            if !self.model.is_some() {
+                println!("extracting values");
+                self.model = Some(self.graph.all_values());
+            }
+        }
     }
 
     fn explain(&mut self, _l: Lit, _x: u32, _buf: &mut Refinement) {
@@ -125,11 +159,16 @@ impl Theory for SchedulingTheory {
             {
                 self.requires_backtrack = false;
 
-                let backtrack_size = ((self.trail.len() - self.trail_lim[level as usize] ) as f32) /(self.trail_lim.len() as f32);
-                println!("Backtracking over {}% of the trail.", (backtrack_size * 100.0) as usize);
+                let backtrack_size = ((self.trail.len() - self.trail_lim[level as usize]) as f32)
+                    / (self.trail_lim.len() as f32);
+                println!(
+                    "Backtracking over {}% of the trail.",
+                    (backtrack_size * 100.0) as usize
+                );
             }
 
-            self.graph.disable_edges(self.trail.drain(self.trail_lim[level as usize]..));
+            self.graph
+                .disable_edges(self.trail.drain(self.trail_lim[level as usize]..));
             self.trail_lim.truncate(level as usize);
         }
     }
@@ -180,7 +219,7 @@ impl SchedulingSolver {
     pub fn add_diff(&mut self, lit: Option<Lit>, x: IntVar, y: IntVar, l: i32) {
         self.was_sat = false;
         if !self.theory().add_diff(lit, x, y, l) {
-           self.add_clause(&vec![]); // UNSAT
+            self.add_clause(&vec![]); // UNSAT
         }
     }
 
@@ -212,10 +251,27 @@ impl SchedulingSolver {
     }
 
     pub fn get_model<'a>(&'a self) -> Option<Model<'a>> {
-      if self.was_sat { return Some(Model { solver: self }); }
-      None
+        if self.was_sat {
+            return Some(Model { solver: self });
+        }
+        None
     }
 
+    pub fn new_sum_constraint(&mut self, bound :u32) -> SumRef {
+      assert!(self.prop.theory.trail_lim.len() == 0);
+      let ref_ = SumRef(self.prop.theory.sum_constraints.len());
+      let lit = self.new_bool();
+      self.prop.theory.sum_constraints.push(Sum { lit, bound, current_value: 0 });
+      ref_
+    }
+
+    pub fn add_constraint_coeff(&mut self, sum :SumRef, IntVar(node) :IntVar, coeff :i32) {
+      assert!(self.prop.theory.trail_lim.len() == 0);
+      let component = NodeSumRef { sum, coeff };
+      let value = self.prop.theory.graph.value(node) * coeff;
+      self.prop.theory.node_constraints[node.idx()].push(component);
+      self.prop.theory.sum_constraints[sum.idx()].current_value += value;
+    }
 }
 
 pub struct Model<'a> {
@@ -226,7 +282,7 @@ impl<'a> Model<'a> {
     /// If the previous call to `solve` was successful, and no variables or constraints have been
     /// added, this returns the value of an integer scheduling variable.
     pub fn get_int_value(&self, IntVar(x): IntVar) -> i32 {
-	debug_assert!(self.solver.prop.theory.model.is_some());
+        debug_assert!(self.solver.prop.theory.model.is_some());
         self.solver.prop.theory.model.as_ref().unwrap().get(x)
     }
 
@@ -238,31 +294,43 @@ impl<'a> Model<'a> {
 }
 
 impl<'a> sattrait::Model<Lit> for Model<'a> {
-  fn value(&self, l :Lit) -> bool { self.get_bool_value(l) }
+    fn value(&self, l: Lit) -> bool {
+        self.get_bool_value(l)
+    }
 }
 
 impl sattrait::SatInstance<Lit> for SchedulingSolver {
-  fn new_var(&mut self) -> Lit { self.new_bool() }
-  fn add_clause(&mut self, c :impl IntoIterator<Item = impl Into<Lit>>) {
-    self.add_clause(&c.into_iter().map(|l| l.into()).collect::<Vec<_>>());
-  }
+    fn new_var(&mut self) -> Lit {
+        self.new_bool()
+    }
+    fn add_clause(&mut self, c: impl IntoIterator<Item = impl Into<Lit>>) {
+        self.add_clause(&c.into_iter().map(|l| l.into()).collect::<Vec<_>>());
+    }
 }
-
 
 impl sattrait::SatSolver<Lit> for SchedulingSolver {
-  fn solve<'a>(&'a mut self, assumptions :impl IntoIterator<Item = impl Into<Lit>>) -> Result<Box<dyn sattrait::Model<Lit> + 'a>, Box<dyn Iterator<Item = Lit> + 'a>> {
-    match self.solve_with_assumptions(&assumptions.into_iter().map(|x| x.into()).collect::<Vec<_>>()) {
-      Ok(m) => Ok(Box::new(m)),
-      Err(c) => Err(c),
+    fn solve<'a>(
+        &'a mut self,
+        assumptions: impl IntoIterator<Item = impl Into<Lit>>,
+    ) -> Result<Box<dyn sattrait::Model<Lit> + 'a>, Box<dyn Iterator<Item = Lit> + 'a>> {
+        match self.solve_with_assumptions(
+            &assumptions
+                .into_iter()
+                .map(|x| x.into())
+                .collect::<Vec<_>>(),
+        ) {
+            Ok(m) => Ok(Box::new(m)),
+            Err(c) => Err(c),
+        }
     }
-  }
 
-  fn result<'a>(&'a self) -> Result<Box<dyn sattrait::Model<Lit> + 'a>, Box<dyn Iterator<Item = Lit> + 'a>> {
-    if self.was_sat {
-      Ok(Box::new(Model{ solver: self}))
-    } else {
-      Err(Box::new(self.prop.conflict.iter().map(|l| !*l)))
+    fn result<'a>(
+        &'a self,
+    ) -> Result<Box<dyn sattrait::Model<Lit> + 'a>, Box<dyn Iterator<Item = Lit> + 'a>> {
+        if self.was_sat {
+            Ok(Box::new(Model { solver: self }))
+        } else {
+            Err(Box::new(self.prop.conflict.iter().map(|l| !*l)))
+        }
     }
-  }
 }
-

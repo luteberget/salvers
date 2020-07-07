@@ -84,7 +84,7 @@ pub fn jobshop1() {
 
         let model = s.solve().unwrap();
 
-	// Optimization using binary search constraints:
+        // Optimization using binary search constraints:
         let mut lo = 0;
         let mut best = None;
         let mut hi = model.get_int_value(max_time);
@@ -113,9 +113,9 @@ pub fn jobshop1() {
             //for (job_idx, job) in jobs.iter().enumerate() {
             //    for (machine_idx, (machine_start, machine_end)) in job.iter().enumerate() {
             //      t0 = t0.min(m.get_int_value(*machine_start));
-	    //    }
-	    //}
-	    let t0 = m.get_int_value(zero);
+            //    }
+            //}
+            let t0 = m.get_int_value(zero);
 
             println!("SAT");
             let val = m.get_int_value(max_time) - t0;
@@ -139,7 +139,7 @@ pub fn jobshop1() {
                 );
             }
             Some(val as u32)
-	} else {
+        } else {
             panic!();
         }
     }

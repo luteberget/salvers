@@ -4,6 +4,12 @@ use smallvec::*;
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Node(u32);
 
+impl Node {
+    pub fn idx(&self) -> usize {
+        self.0 as usize
+    }
+}
+
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Edge(u32);
 
@@ -28,11 +34,13 @@ pub struct LongestPaths {
 }
 
 pub struct Values {
-  values :Vec<i32>,
+    values: Vec<i32>,
 }
 
 impl Values {
-   pub fn get(&self, n :Node) -> i32 { self.values[n.0 as usize] }
+    pub fn get(&self, n: Node) -> i32 {
+        self.values[n.0 as usize]
+    }
 }
 
 impl LongestPaths {
@@ -81,7 +89,9 @@ impl LongestPaths {
     }
 
     pub fn all_values(&self) -> Values {
-       Values { values: self.values.clone() }
+        Values {
+            values: self.values.clone(),
+        }
     }
 
     pub fn critical_path<'a>(&'a self, node: Node) -> impl Iterator<Item = Edge> + 'a {
@@ -122,14 +132,17 @@ impl LongestPaths {
         {
             let values = &self.values;
             let edges = &self.edge_data;
-            self.queue.insert(add_idx as i32, |i| values[edges[*i as usize].target as usize]);
+            self.queue.insert(add_idx as i32, |i| {
+                values[edges[*i as usize].target as usize]
+            });
         }
 
         let mut updated_root = false;
         while let Some(edge_idx) = {
             let values = &self.values;
             let edges = &self.edge_data;
-            self.queue.remove_min(|i| values[edges[*i as usize].target as usize])
+            self.queue
+                .remove_min(|i| values[edges[*i as usize].target as usize])
         } {
             let edge = &self.edge_data[edge_idx as usize];
             println!("Enabling edge {:?}", edge);
@@ -140,7 +153,7 @@ impl LongestPaths {
                 if updated_root && edge_idx == add_idx as i32 {
                     // Forget about the queued edges.
                     self.queue.clear();
- 
+
                     // Backtrack updated node values
                     for (node, dist) in self.current_updates.iter().rev() {
                         self.values[*node as usize] = *dist;
@@ -184,7 +197,9 @@ impl LongestPaths {
                     }
                     let values = &self.values;
                     let edges = &self.edge_data;
-                    self.queue.insert(*next_edge_idx as i32, |i| values[edges[*i as usize].target as usize]);
+                    self.queue.insert(*next_edge_idx as i32, |i| {
+                        values[edges[*i as usize].target as usize]
+                    });
                 }
             }
         }
@@ -204,10 +219,10 @@ impl LongestPaths {
         debug_assert!(self.queue.is_empty());
 
         // Add the edges-to-be-disabled to the heap.
-let mut i = 0;
-let mut j = 0;
+        let mut i = 0;
+        let mut j = 0;
         for Edge(edge_idx) in edges.into_iter() {
-i += 1;
+            i += 1;
             let edge = &mut self.edge_data[edge_idx as usize];
 
             // Was it already disabled?
@@ -231,16 +246,19 @@ i += 1;
             let values = &self.values;
             let edges = &self.edge_data;
             println!("adding to queue {:?}", edge_idx);
-j += 1;
-            self.queue.insert(edge_idx as i32, |i| values[edges[*i as usize].target as usize]);
+            j += 1;
+            self.queue.insert(edge_idx as i32, |i| {
+                values[edges[*i as usize].target as usize]
+            });
         }
 
-println!("disabling {}/{} edges", j, i);
+        println!("disabling {}/{} edges", j, i);
 
         while let Some(edge_idx) = {
             let values = &self.values;
             let edges = &self.edge_data;
-            self.queue.remove_min(|i| values[edges[*i as usize].target as usize])
+            self.queue
+                .remove_min(|i| values[edges[*i as usize].target as usize])
         } {
             let edge = &self.edge_data[edge_idx as usize];
 
@@ -293,7 +311,12 @@ println!("disabling {}/{} edges", j, i);
                 if new_value < old_value {
                     // Update the value
                     self.values[edge.target as usize] = new_value;
-                    println!("disable: setting {:?} from {} to {}", Node(edge.target), old_value, new_value);
+                    println!(
+                        "disable: setting {:?} from {} to {}",
+                        Node(edge.target),
+                        old_value,
+                        new_value
+                    );
                     event(Node(edge.target), old_value, new_value);
                     
                     // Add outgoing edges to the update queue.
@@ -306,7 +329,9 @@ println!("disabling {}/{} edges", j, i);
                         }
                         let values = &self.values;
                         let edges = &self.edge_data;
-                        self.queue.insert(*next_edge_idx as i32, |i| values[edges[*i as usize].target as usize]);
+                        self.queue.insert(*next_edge_idx as i32, |i| {
+                            values[edges[*i as usize].target as usize]
+                        });
                     }
                 }
             }
@@ -485,7 +510,9 @@ mod tests {
         let e2 = lp.new_edge(n2, n3, 5);
         let e3 = lp.new_edge(n3, n4, 5);
 
-        for e in vec![e1,e2,e3] { assert!(lp.enable_edge(e).is_ok()); } 
+        for e in vec![e1, e2, e3] {
+            assert!(lp.enable_edge(e).is_ok());
+        }
         assert_eq!(lp.value(n1), 0);
         assert_eq!(lp.value(n2), 5);
         assert_eq!(lp.value(n3), 10);
@@ -496,7 +523,5 @@ mod tests {
         assert_eq!(lp.value(n2), 0);
         assert_eq!(lp.value(n3), 5);
         assert_eq!(lp.value(n4), 10);
-
     }
-
 }
