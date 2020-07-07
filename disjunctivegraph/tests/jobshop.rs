@@ -109,12 +109,13 @@ pub fn jobshop1() {
         s.add_diff(None, max_time, zero, -val); // max_time <= 5   --> max_time >= 5
 
         if let Ok(m) = s.solve() {
-            let mut t0 = 99999999; // TODO how to get i32::MAX_VALUE? I don't have internet at the moment. :)
-            for (job_idx, job) in jobs.iter().enumerate() {
-                for (machine_idx, (machine_start, machine_end)) in job.iter().enumerate() {
-                  t0 = t0.min(m.get_int_value(*machine_start));
-		}
-	    }
+            //let mut t0 = 99999999; // TODO how to get i32::MAX_VALUE? I don't have internet at the moment. :)
+            //for (job_idx, job) in jobs.iter().enumerate() {
+            //    for (machine_idx, (machine_start, machine_end)) in job.iter().enumerate() {
+            //      t0 = t0.min(m.get_int_value(*machine_start));
+	    //    }
+	    //}
+	    let t0 = m.get_int_value(zero);
 
             println!("SAT");
             let val = m.get_int_value(max_time) - t0;

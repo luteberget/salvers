@@ -19,6 +19,7 @@ struct SchedulingTheory {
     requires_backtrack: bool,
 
     model: Option<Values>,
+    invalidate_model: bool,
 
     trail: Vec<Edge>,
     trail_lim: Vec<usize>,
@@ -32,6 +33,7 @@ impl SchedulingTheory {
             #[cfg(debug_assertions)]
             requires_backtrack: false,
 	    model: None,
+            invalidate_model: false,
             graph: LongestPaths::new(),
             trail: Vec::new(),
             trail_lim: Vec::new(),
@@ -69,9 +71,13 @@ impl Theory for SchedulingTheory {
         #[cfg(debug_assertions)]
         assert!(!self.requires_backtrack);
 
+        if self.invalidate_model {
+           self.invalidate_model = false;
+           self.model = None;
+	}
+
         for lit in lits {
             if let Some(edge) = self.condition_edge.get(lit) {
-	      self.model = None;
               if let Err(cycle) = self.graph.enable_edge(*edge) {
 
                 let map = &self.edge_condition;
@@ -113,6 +119,7 @@ impl Theory for SchedulingTheory {
     }
 
     fn backtrack(&mut self, level: i32) {
+        self.invalidate_model = true;
         if (level as usize) < self.trail_lim.len() {
             #[cfg(debug_assertions)]
             {
@@ -229,3 +236,33 @@ impl<'a> Model<'a> {
         self.solver.prop.value(lit)
     }
 }
+
+impl<'a> sattrait::Model<Lit> for Model<'a> {
+  fn value(&self, l :Lit) -> bool { self.get_bool_value(l) }
+}
+
+impl sattrait::SatInstance<Lit> for SchedulingSolver {
+  fn new_var(&mut self) -> Lit { self.new_bool() }
+  fn add_clause(&mut self, c :impl IntoIterator<Item = impl Into<Lit>>) {
+    self.add_clause(&c.into_iter().map(|l| l.into()).collect::<Vec<_>>());
+  }
+}
+
+
+impl sattrait::SatSolver<Lit> for SchedulingSolver {
+  fn solve<'a>(&'a mut self, assumptions :impl IntoIterator<Item = impl Into<Lit>>) -> Result<Box<dyn sattrait::Model<Lit> + 'a>, Box<dyn Iterator<Item = Lit> + 'a>> {
+    match self.solve_with_assumptions(&assumptions.into_iter().map(|x| x.into()).collect::<Vec<_>>()) {
+      Ok(m) => Ok(Box::new(m)),
+      Err(c) => Err(c),
+    }
+  }
+
+  fn result<'a>(&'a self) -> Result<Box<dyn sattrait::Model<Lit> + 'a>, Box<dyn Iterator<Item = Lit> + 'a>> {
+    if self.was_sat {
+      Ok(Box::new(Model{ solver: self}))
+    } else {
+      Err(Box::new(self.prop.conflict.iter().map(|l| !*l)))
+    }
+  }
+}
+
