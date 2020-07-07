@@ -11,7 +11,7 @@ pub struct Edge(u32);
 struct EdgeData {
     source: i32,
     target: u32,
-    distance: u32,
+    distance: i32,
 }
 
 pub struct LongestPaths {
@@ -21,10 +21,18 @@ pub struct LongestPaths {
     node_outgoing: Vec<SmallVec<[u32; 4]>>,
     node_incoming: Vec<SmallVec<[u32; 4]>>,
     node_updated_from: Vec<i32>,
-    values: Vec<u32>,
+    values: Vec<i32>,
 
-    current_updates: Vec<(u32, u32)>, // node -> overwritten value
+    current_updates: Vec<(u32, i32)>, // node -> overwritten value
     queue: OrderHeap,
+}
+
+pub struct Values {
+  values :Vec<i32>,
+}
+
+impl Values {
+   pub fn get(&self, n :Node) -> i32 { self.values[n.0 as usize] }
 }
 
 impl LongestPaths {
@@ -55,7 +63,7 @@ impl LongestPaths {
         node
     }
 
-    pub fn new_edge(&mut self, a: Node, b: Node, l: u32) -> Edge {
+    pub fn new_edge(&mut self, a: Node, b: Node, l: i32) -> Edge {
         let edge = Edge(self.n_edges as u32);
         self.n_edges += 1;
         self.edge_data.push(EdgeData {
@@ -68,8 +76,12 @@ impl LongestPaths {
         edge
     }
 
-    pub fn value(&self, node: Node) -> u32 {
+    pub fn value(&self, node: Node) -> i32 {
         self.values[node.0 as usize]
+    }
+
+    pub fn all_values(&self) -> Values {
+       Values { values: self.values.clone() }
     }
 
     pub fn critical_path<'a>(&'a self, node: Node) -> impl Iterator<Item = Edge> + 'a {
@@ -83,7 +95,7 @@ impl LongestPaths {
     pub fn enable_edge_cb<'a>(
         &'a mut self,
         Edge(add_idx): Edge,
-        mut event: impl FnMut(Node, u32, u32),
+        mut event: impl FnMut(Node, i32, i32),
     ) -> Result<(), CycleIterator<'a>> {
         let edge = &mut self.edge_data[add_idx as usize];
 
@@ -110,17 +122,14 @@ impl LongestPaths {
         {
             let values = &self.values;
             let edges = &self.edge_data;
-            self.queue.insert(add_idx as i32, |i| {
-                values[edges[*i as usize].target as usize] as i32
-            });
+            self.queue.insert(add_idx as i32, |i| values[edges[*i as usize].target as usize]);
         }
 
         let mut updated_root = false;
         while let Some(edge_idx) = {
             let values = &self.values;
             let edges = &self.edge_data;
-            self.queue
-                .remove_min(|i| values[edges[*i as usize].target as usize] as i32)
+            self.queue.remove_min(|i| values[edges[*i as usize].target as usize])
         } {
             let edge = &self.edge_data[edge_idx as usize];
             println!("Enabling edge {:?}", edge);
@@ -172,9 +181,7 @@ impl LongestPaths {
                     }
                     let values = &self.values;
                     let edges = &self.edge_data;
-                    self.queue.insert(*next_edge_idx as i32, |i| {
-                        values[edges[*i as usize].target as usize] as i32
-                    });
+                    self.queue.insert(*next_edge_idx as i32, |i| values[edges[*i as usize].target as usize]);
                 }
             }
         }
@@ -189,7 +196,7 @@ impl LongestPaths {
     pub fn disable_edges_cb(
         &mut self,
         edges: impl IntoIterator<Item = Edge>,
-        mut event: impl FnMut(Node, u32, u32),
+        mut event: impl FnMut(Node, i32, i32),
     ) {
         debug_assert!(self.queue.is_empty());
 
@@ -222,9 +229,7 @@ i += 1;
             let edges = &self.edge_data;
             println!("adding to queue {:?}", edge_idx);
 j += 1;
-            self.queue.insert(edge_idx as i32, |i| {
-                values[edges[*i as usize].target as usize] as i32
-            });
+            self.queue.insert(edge_idx as i32, |i| values[edges[*i as usize].target as usize]);
         }
 
 println!("disabling {}/{} edges", j, i);
@@ -299,9 +304,7 @@ println!("disabling {}/{} edges", j, i);
                         }
                         let values = &self.values;
                         let edges = &self.edge_data;
-                        self.queue.insert(*next_edge_idx as i32, |i| {
-                            values[edges[*i as usize].target as usize] as i32
-                        });
+                        self.queue.insert(*next_edge_idx as i32, |i| values[edges[*i as usize].target as usize]);
                     }
                 }
             }
