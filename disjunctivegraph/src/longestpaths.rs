@@ -138,6 +138,9 @@ impl LongestPaths {
 
             if target_updated {
                 if updated_root && edge_idx == add_idx as i32 {
+                    // Forget about the queued edges.
+                    self.queue.clear();
+ 
                     // Backtrack updated node values
                     for (node, dist) in self.current_updates.iter().rev() {
                         self.values[*node as usize] = *dist;
@@ -237,16 +240,15 @@ println!("disabling {}/{} edges", j, i);
         while let Some(edge_idx) = {
             let values = &self.values;
             let edges = &self.edge_data;
-            self.queue
-                .remove_min(|i| values[edges[*i as usize].target as usize] as i32)
+            self.queue.remove_min(|i| values[edges[*i as usize].target as usize])
         } {
             let edge = &self.edge_data[edge_idx as usize];
 
             // The values should already be consistent with this edge.
-            debug_assert!(
-                self.values[edge.source.abs() as usize] + edge.distance
-                    <= self.values[edge.target as usize]
-            );
+            //debug_assert!(
+            //    self.values[edge.source.abs() as usize] + edge.distance
+            //        <= self.values[edge.target as usize]
+            //);
 
             let is_critical = self.node_updated_from[edge.target as usize] == edge_idx;
             println!(
