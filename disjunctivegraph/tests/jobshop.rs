@@ -40,9 +40,9 @@ pub fn jobshop1() {
                         let start_time = s.new_int();
                         let end_time = s.new_int();
                         // Constraint: times are greater than zero
-                        //s.add_diff(None, zero, start_time, 0);
+                        s.add_diff(None, zero, start_time, 0);
                         // Constraint: processing takes (at least) specified amount of time.
-                        s.add_diff(None, start_time, end_time, *processing_time); // start + proc <= end
+                        s.add_diff(None, start_time, end_time, *processing_time as i32); // start + proc <= end
                         (start_time, end_time)
                     })
                     .collect::<Vec<_>>();
@@ -82,14 +82,47 @@ pub fn jobshop1() {
             }
         }
 
+        let model = s.solve().unwrap();
+
+	// Optimization using binary search constraints:
+        let mut lo = 0;
+        let mut best = None;
+        let mut hi = model.get_int_value(max_time);
+        let (b, val) = loop {
+            let mid = (lo + hi) / 2;
+            println!("binsearch {} {} {}", lo, mid, hi);
+            let x = s.new_bool();
+            s.add_diff(Some(x), max_time, zero, -mid); // max_time <= 5   --> max_time >= 5
+            if s.solve_with_assumptions(&vec![x]).is_ok() {
+                println!("mid={} success", mid);
+                best = Some(x);
+                hi = mid;
+            } else {
+                println!("mid={} failed", mid);
+                lo = mid + 1;
+            }
+            if hi <= lo {
+                println!("done {} {} {}", lo, mid, hi);
+                break (x, lo);
+            }
+        };
+        s.add_diff(None, max_time, zero, -val); // max_time <= 5   --> max_time >= 5
+
         if let Ok(m) = s.solve() {
+            let mut t0 = 99999999; // TODO how to get i32::MAX_VALUE? I don't have internet at the moment. :)
+            for (job_idx, job) in jobs.iter().enumerate() {
+                for (machine_idx, (machine_start, machine_end)) in job.iter().enumerate() {
+                  t0 = t0.min(m.get_int_value(*machine_start));
+		}
+	    }
+
             println!("SAT");
-            let val = m.get_int_value(max_time);
+            let val = m.get_int_value(max_time) - t0;
             let mut output: Vec<Vec<u8>> = vec![vec!['_' as u8; val as usize]; num_machines];
             for (job_idx, job) in jobs.iter().enumerate() {
                 for (machine_idx, (machine_start, machine_end)) in job.iter().enumerate() {
-                    let t1 = m.get_int_value(*machine_start);
-                    let t2 = m.get_int_value(*machine_end);
+                    let t1 = m.get_int_value(*machine_start) - t0;
+                    let t2 = m.get_int_value(*machine_end) - t0;
                     println!("j{} m{} t{}-t{}", job_idx, machine_idx, t1, t2);
                     for c in &mut output[machine_idx][t1 as usize..t2 as usize] {
                         *c = std::char::from_digit(job_idx as u32, 10).unwrap() as u8;
@@ -108,58 +141,5 @@ pub fn jobshop1() {
 	} else {
             panic!();
         }
-
-
-	// TODO optimization using binary search:
-        
-        //let mut lo = 0;
-        //let mut best = None;
-        //let mut hi = s.get_int_value(max_time);
-        //let (b, val) = loop {
-        //    let mid = (lo + hi) / 2;
-        //    println!("binsearch {} {} {}", lo, mid, hi);
-        //    let x = s.new_bool();
-        //    s.add_diff(Some(x), max_time, s.zero(), mid); // max_time <= 5   --> max_time >= 5
-        //    if s.solve_with_assumptions(&vec![x]).is_ok() {
-        //        println!("mid={} success", mid);
-        //        best = Some(x);
-        //        hi = mid;
-        //    } else {
-        //        println!("mid={} failed", mid);
-        //        lo = mid + 1;
-        //    }
-        //    if hi <= lo {
-        //        println!("done {} {} {}", lo, mid, hi);
-        //        break (x, lo);
-        //    }
-        //};
-        //s.add_diff(None, max_time, s.zero(), val); // max_time <= 5   --> max_time >= 5
-
-        //if s.solve().is_ok() {
-        //    println!("SAT");
-        //    let mut output: Vec<Vec<u8>> = vec![vec!['_' as u8; val as usize]; num_machines];
-        //    for (job_idx, job) in jobs.iter().enumerate() {
-        //        for (machine_idx, (machine_start, machine_end)) in job.iter().enumerate() {
-        //            let t1 = s.get_int_value(*machine_start);
-        //            let t2 = s.get_int_value(*machine_end);
-        //            println!("j{} m{} t{}-t{}", job_idx, machine_idx, t1, t2);
-        //            for c in &mut output[machine_idx][t1 as usize..t2 as usize] {
-        //                *c = std::char::from_digit(job_idx as u32, 10).unwrap() as u8;
-        //            }
-        //        }
-        //    }
-
-        //    for (machine, schedule) in output.iter().enumerate() {
-        //        println!(
-        //            "M{}: {}",
-        //            machine,
-        //            String::from_utf8(schedule.clone()).unwrap()
-        //        );
-        //    }
-        //    Some(val as u32)
-        //} else {
-        //    println!("UNSAT");
-        //    panic!();
-        //}
     }
 }
