@@ -18,6 +18,8 @@ struct SchedulingTheory {
     #[cfg(debug_assertions)]
     requires_backtrack: bool,
 
+    model: Option<Values>,
+
     trail: Vec<Edge>,
     trail_lim: Vec<usize>,
 }
@@ -29,6 +31,7 @@ impl SchedulingTheory {
             edge_condition :HashMap::new(),
             #[cfg(debug_assertions)]
             requires_backtrack: false,
+	    model: None,
             graph: LongestPaths::new(),
             trail: Vec::new(),
             trail_lim: Vec::new(),
@@ -45,7 +48,7 @@ impl SchedulingTheory {
         lit: Option<Lit>,
         IntVar(x): IntVar,
         IntVar(y): IntVar,
-        length: u32,
+        length: i32,
     ) -> bool {
         let _p = hprof::enter("add scheduling constraint");
 	assert!(self.trail_lim.len() == 0);
@@ -62,12 +65,13 @@ impl SchedulingTheory {
 }
 
 impl Theory for SchedulingTheory {
-    fn check(&mut self, _ch: Check, lits: &[Lit], buf: &mut Refinement) {
+    fn check(&mut self, ch: Check, lits: &[Lit], buf: &mut Refinement) {
         #[cfg(debug_assertions)]
         assert!(!self.requires_backtrack);
 
         for lit in lits {
             if let Some(edge) = self.condition_edge.get(lit) {
+	      self.model = None;
               if let Err(cycle) = self.graph.enable_edge(*edge) {
 
                 let map = &self.edge_condition;
@@ -89,6 +93,15 @@ impl Theory for SchedulingTheory {
                 println!("irrelevant lit {:?}", lit);
             }
         }
+
+        if let Check::Final = ch {
+          // If we get here, the problem is SAT, so we preserve the model before backtracking.
+          println!("Theory: FINAL SAT");
+	  if !self.model.is_some() {
+            println!("extracting values");
+            self.model = Some(self.graph.all_values());
+	  }
+	}
     }
 
     fn explain(&mut self, _l: Lit, _x: u32, _buf: &mut Refinement) {
@@ -104,6 +117,9 @@ impl Theory for SchedulingTheory {
             #[cfg(debug_assertions)]
             {
                 self.requires_backtrack = false;
+
+                let backtrack_size = ((self.trail.len() - self.trail_lim[level as usize] ) as f32) /(self.trail_lim.len() as f32);
+                println!("Backtracking over {}% of the trail.", (backtrack_size * 100.0) as usize);
             }
 
             self.graph.disable_edges(self.trail.drain(self.trail_lim[level as usize]..));
@@ -154,7 +170,7 @@ impl SchedulingSolver {
     /// Add a difference constraint over integer scheduling variables.
     /// If the `lit` argument is given, the constraint is implied by the given boolean literal.
     /// If `lit` is `None`, the constraint is always implied.
-    pub fn add_diff(&mut self, lit: Option<Lit>, x: IntVar, y: IntVar, l: u32) {
+    pub fn add_diff(&mut self, lit: Option<Lit>, x: IntVar, y: IntVar, l: i32) {
         self.was_sat = false;
         if !self.theory().add_diff(lit, x, y, l) {
            self.add_clause(&vec![]); // UNSAT
@@ -202,8 +218,9 @@ pub struct Model<'a> {
 impl<'a> Model<'a> {
     /// If the previous call to `solve` was successful, and no variables or constraints have been
     /// added, this returns the value of an integer scheduling variable.
-    pub fn get_int_value(&self, IntVar(x): IntVar) -> u32 {
-        self.solver.prop.theory.graph.value(x)
+    pub fn get_int_value(&self, IntVar(x): IntVar) -> i32 {
+	debug_assert!(self.solver.prop.theory.model.is_some());
+        self.solver.prop.theory.model.as_ref().unwrap().get(x)
     }
 
     /// If the previous call to `solve` was successful, and no variables or constraints have been
