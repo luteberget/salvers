@@ -272,45 +272,41 @@ println!("disabling {}/{} edges", j, i);
                     }
                 }
 
+                let old_value = self.values[edge.target as usize];
                 if let Some(critical_edge) = critical_edge {
                     self.node_updated_from[edge.target as usize] = critical_edge as i32;
-
                     debug_assert!(critical_dist <= self.values[edge.target as usize]);
                     debug_assert!(self.edge_data[critical_edge as usize].source > 0);
                     debug_assert!(self.edge_data[critical_edge as usize].target == edge.target);
-
-                    let target_updated = critical_dist < self.values[edge.target as usize];
-                    if target_updated {
-                        // Update the value
-                        let old_value = self.values[edge.target as usize];
-                        let new_value = critical_dist;
-                        debug_assert!(new_value < old_value);
-                        self.values[edge.target as usize] = new_value;
-                        println!("disable: setting {:?} from {} to {}", Node(edge.target), old_value, new_value);
-                        event(Node(edge.target), old_value, new_value);
-
-                        // Add outgoing edges to the update queue.
-                        for next_edge_idx in self.node_outgoing[edge.target as usize].iter() {
-                            if self.edge_data[*next_edge_idx as usize].source < 0 {
-                                continue;
-                            }
-                            if self.queue.contains(*next_edge_idx as i32) {
-                                continue;
-                            }
-                            let values = &self.values;
-                            let edges = &self.edge_data;
-                            self.queue.insert(*next_edge_idx as i32, |i| {
-                                values[edges[*i as usize].target as usize] as i32
-                            });
-                        }
-                    }
                 } else {
-                    self.values[edge.target as usize] = 0;
                     self.node_updated_from[edge.target as usize] = -1;
+                }
+
+                let new_value = critical_dist;
+                if new_value < old_value {
+                    // Update the value
+                    self.values[edge.target as usize] = new_value;
+                    println!("disable: setting {:?} from {} to {}", Node(edge.target), old_value, new_value);
+                    event(Node(edge.target), old_value, new_value);
+                    
+                    // Add outgoing edges to the update queue.
+                    for next_edge_idx in self.node_outgoing[edge.target as usize].iter() {
+                        if self.edge_data[*next_edge_idx as usize].source < 0 {
+                            continue;
+                        }
+                        if self.queue.contains(*next_edge_idx as i32) {
+                            continue;
+                        }
+                        let values = &self.values;
+                        let edges = &self.edge_data;
+                        self.queue.insert(*next_edge_idx as i32, |i| {
+                            values[edges[*i as usize].target as usize] as i32
+                        });
+                    }
                 }
             }
         }
-            println!("  disable-final-values: {:?}", self.values);
+        println!("  disable-final-values: {:?}", self.values);
     }
 }
 
