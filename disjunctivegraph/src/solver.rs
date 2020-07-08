@@ -27,6 +27,25 @@ struct Sum {
     current_value :i32,
 }
 
+struct SumWatcher {
+    sum_constraints: Vec<Sum>,
+    node_constraints: Vec<SmallVec<[NodeSumRef; 4]>>,
+}
+
+impl SumWatcher {
+    fn new() -> Self {
+	SumWatcher {
+            sum_constraints: Vec::new(),
+            node_constraints: Vec::new(),
+	}
+    }
+
+    fn notify(&mut self, node :Node, a :i32, b :i32) {
+//todo!()
+    }
+
+}
+
 struct SchedulingTheory {
     condition_edge: HashMap<Lit, Edge>, // Map from bool variable to edge
     edge_condition: HashMap<Edge, Lit>, // Map from edge to bool variable
@@ -38,9 +57,7 @@ struct SchedulingTheory {
     model: Option<Values>,
     invalidate_model: bool,
 
-    sum_constraints: Vec<Sum>,
-    node_constraints: Vec<SmallVec<[NodeSumRef; 4]>>,
-
+    sum_watcher :SumWatcher,
     trail: Vec<Edge>,
     trail_lim: Vec<usize>,
 }
@@ -54,10 +71,7 @@ impl SchedulingTheory {
             requires_backtrack: false,
             model: None,
             invalidate_model: false,
-
-            sum_constraints: Vec::new(),
-            node_constraints: Vec::new(),
-
+	    sum_watcher: SumWatcher::new(),
             graph: LongestPaths::new(),
             trail: Vec::new(),
             trail_lim: Vec::new(),
@@ -68,8 +82,8 @@ impl SchedulingTheory {
     fn new_int(&mut self) -> IntVar {
         assert!(self.trail_lim.len() == 0);
         let node = self.graph.new_node();
-        while self.node_constraints.len() <= node.idx() {
-          self.node_constraints.push(Default::default());
+        while self.sum_watcher.node_constraints.len() <= node.idx() {
+          self.sum_watcher.node_constraints.push(Default::default());
         }
         IntVar(node)
     }
@@ -89,14 +103,8 @@ impl SchedulingTheory {
             self.edge_condition.insert(edge, lit);
             true
         } else {
-            let (node_constraints, sum_constraints) = (&mut self.node_constraints, &mut self.sum_constraints);
-            let result = self.graph.enable_edge_cb(edge, |node,old,new| {
-              for component in node_constraints[node.idx()].iter() {
-                let sum = &mut sum_constraints[component.sum.idx()];
-                let value_diff = component.coeff * (new - old);
-                sum.current_value += value_diff;
-              }
-            }).is_ok();
+            let sums = &mut self.sum_watcher;
+            let result = self.graph.enable_edge_cb(edge, |nd,a,b| sums.notify(nd,a,b)).is_ok();
             result
         }
     }
@@ -114,7 +122,8 @@ impl Theory for SchedulingTheory {
 
         for lit in lits {
             if let Some(edge) = self.condition_edge.get(lit) {
-                if let Err(cycle) = self.graph.enable_edge(*edge) {
+                let sums = &mut self.sum_watcher;
+                if let Err(cycle) = self.graph.enable_edge_cb(*edge, |nd,a,b| sums.notify(nd,a,b)) {
                     let map = &self.edge_condition;
                     let cycle = cycle.filter_map(|edge| map.get(&edge)).map(|lit| !*lit);
 
@@ -259,9 +268,9 @@ impl SchedulingSolver {
 
     pub fn new_sum_constraint(&mut self, bound :u32) -> SumRef {
       assert!(self.prop.theory.trail_lim.len() == 0);
-      let ref_ = SumRef(self.prop.theory.sum_constraints.len());
+      let ref_ = SumRef(self.prop.theory.sum_watcher.sum_constraints.len());
       let lit = self.new_bool();
-      self.prop.theory.sum_constraints.push(Sum { lit, bound, current_value: 0 });
+      self.prop.theory.sum_watcher.sum_constraints.push(Sum { lit, bound, current_value: 0 });
       ref_
     }
 
@@ -269,8 +278,8 @@ impl SchedulingSolver {
       assert!(self.prop.theory.trail_lim.len() == 0);
       let component = NodeSumRef { sum, coeff };
       let value = self.prop.theory.graph.value(node) * coeff;
-      self.prop.theory.node_constraints[node.idx()].push(component);
-      self.prop.theory.sum_constraints[sum.idx()].current_value += value;
+      self.prop.theory.sum_watcher.node_constraints[node.idx()].push(component);
+      self.prop.theory.sum_watcher.sum_constraints[sum.idx()].current_value += value;
     }
 }
 
