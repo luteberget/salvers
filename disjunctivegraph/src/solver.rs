@@ -47,12 +47,21 @@ impl SumWatcher {
     }
 
     fn notify(&mut self, node: Node, old: i32, new :i32) {
+        println!("notify {:?} {} {}", node, old, new);
         for NodeSumRef { sumref, coeff } in self.node_constraints[node.idx()].iter() {
-            let sum = &mut self.sum_constraints[sumref.idx()];
-            let delta = coeff * (new - old);
-            sum.current_value += delta;
+            // remove previous violation
 
-            if sum.current_value > sum.bound as i32 {
+            let sum = &mut self.sum_constraints[sumref.idx()];
+            let new_value = sum.current_value + coeff * (new - old);
+
+            if sum.current_value > sum.bound as i32 && !(new_value > sum.bound as i32) {
+                self.violations.retain(|x| x != sumref);
+            }
+
+            sum.current_value = new_value;
+
+            if new_value > sum.bound as i32 {
+                println!("Adding violation {:?}", sumref);
                 self.violations.push(*sumref);
                 sum.min_violation = sum.min_violation.min(sum.current_value as u32 - sum.bound);
             }
@@ -311,10 +320,9 @@ impl SchedulingSolver {
         None
     }
 
-    pub fn new_sum_constraint(&mut self, bound: u32) -> SumRef {
+    pub fn new_sum_constraint(&mut self, lit :Lit, bound: u32) -> SumRef {
         assert!(self.prop.theory.trail_lim.len() == 0);
         let ref_ = SumRef(self.prop.theory.sum_watcher.sum_constraints.len() as u32);
-        let lit = self.new_bool();
         self.prop.theory.sum_watcher.sum_constraints.push(Sum {
             nodes : SmallVec::new(),
             lit,
