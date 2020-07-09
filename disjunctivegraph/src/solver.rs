@@ -49,11 +49,11 @@ impl SumWatcher {
     fn notify(&mut self, node: Node, old: i32, new :i32) {
         println!("notify {:?} {} {}", node, old, new);
         for NodeSumRef { sumref, coeff } in self.node_constraints[node.idx()].iter() {
-            // remove previous violation
 
             let sum = &mut self.sum_constraints[sumref.idx()];
             let new_value = sum.current_value + coeff * (new - old);
 
+            // remove previous violation
             if sum.current_value > sum.bound as i32 && !(new_value > sum.bound as i32) {
                 self.violations.retain(|x| x != sumref);
             }
@@ -320,6 +320,15 @@ impl SchedulingSolver {
         None
     }
 
+    pub fn delete_sum_constraint(&mut self, sumref :SumRef) {
+        assert!(self.prop.theory.trail_lim.len() == 0);
+        for node in self.prop.theory.sum_watcher.sum_constraints[sumref.idx()].nodes.iter() {
+            self.prop.theory.sum_watcher.node_constraints[node.idx()].retain(|n| n.sumref != sumref);
+        }
+        let lit = self.prop.theory.sum_watcher.sum_constraints[sumref.idx()].lit;
+        self.add_clause(&vec![!lit]);
+    }
+
     pub fn new_sum_constraint(&mut self, lit :Lit, bound: u32) -> SumRef {
         assert!(self.prop.theory.trail_lim.len() == 0);
         let ref_ = SumRef(self.prop.theory.sum_watcher.sum_constraints.len() as u32);
@@ -340,6 +349,36 @@ impl SchedulingSolver {
         let sum = &mut self.prop.theory.sum_watcher.sum_constraints[sumref.idx()];
         sum.current_value += value;
         sum.nodes.push(node);
+    }
+
+    pub fn optimize<'a>(&'a mut self) -> Result<(i32,Model<'a>), ()>{
+        // RC2-like algorithm, except that the constraints are not relaxable, 
+        // and they are implemented as a theory using diff constraints scheduling/longest paths.
+
+        let mut cost : i32 = 0;
+
+        loop {
+
+            let mut assumptions = vec![];
+            let mut result = self.solve_with_assumptions(&assumptions);
+            match result {
+                Ok(model) => {
+                    return Ok((cost, model));
+                },
+                Err(ref mut core) => {
+
+                    let core = core.collect::<Vec<_>>();
+
+                    todo!();
+
+                    //for sumref in core.iter().map(|x| 
+
+
+                },
+            }
+
+        }
+
     }
 }
 
