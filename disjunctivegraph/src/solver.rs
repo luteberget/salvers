@@ -10,40 +10,58 @@ pub struct IntVar(Node);
 
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 /// Integer variable for use in scheduling constraints (see `SchedulingSolver`).
-pub struct SumRef(usize);
+pub struct SumRef(u32);
 
 impl SumRef {
-  fn idx(&self) -> usize { self.0 }
+    fn idx(&self) -> usize {
+        self.0 as usize
+    }
 }
 
 struct NodeSumRef {
-    sum :SumRef,
+    sumref: SumRef,
     coeff: i32,
 }
 
 struct Sum {
-    lit :Lit,
+    lit: Lit,
     bound: u32,
-    current_value :i32,
+    current_value: i32,
+    min_violation :u32,
+    nodes :SmallVec<[Node;4]>,
 }
 
 struct SumWatcher {
     sum_constraints: Vec<Sum>,
     node_constraints: Vec<SmallVec<[NodeSumRef; 4]>>,
+    violations: Vec<SumRef>,
 }
 
 impl SumWatcher {
     fn new() -> Self {
-	SumWatcher {
+        SumWatcher {
             sum_constraints: Vec::new(),
             node_constraints: Vec::new(),
-	}
+            violations: Vec::new(),
+        }
     }
 
-    fn notify(&mut self, node :Node, a :i32, b :i32) {
-//todo!()
+    fn notify(&mut self, node: Node, old: i32, new :i32) {
+        for NodeSumRef { sumref, coeff } in self.node_constraints[node.idx()].iter() {
+            let sum = &mut self.sum_constraints[sumref.idx()];
+            let delta = coeff * (new - old);
+            sum.current_value += delta;
+
+            if sum.current_value > sum.bound as i32 {
+                self.violations.push(*sumref);
+                sum.min_violation = sum.min_violation.min(sum.current_value as u32 - sum.bound);
+            }
+        }
     }
 
+    fn get_violations(&self) -> &[SumRef] {
+        &self.violations
+    }
 }
 
 struct SchedulingTheory {
@@ -57,7 +75,7 @@ struct SchedulingTheory {
     model: Option<Values>,
     invalidate_model: bool,
 
-    sum_watcher :SumWatcher,
+    sum_watcher: SumWatcher,
     trail: Vec<Edge>,
     trail_lim: Vec<usize>,
 }
@@ -71,19 +89,18 @@ impl SchedulingTheory {
             requires_backtrack: false,
             model: None,
             invalidate_model: false,
-	    sum_watcher: SumWatcher::new(),
+            sum_watcher: SumWatcher::new(),
             graph: LongestPaths::new(),
             trail: Vec::new(),
             trail_lim: Vec::new(),
         }
     }
 
-
     fn new_int(&mut self) -> IntVar {
         assert!(self.trail_lim.len() == 0);
         let node = self.graph.new_node();
         while self.sum_watcher.node_constraints.len() <= node.idx() {
-          self.sum_watcher.node_constraints.push(Default::default());
+            self.sum_watcher.node_constraints.push(Default::default());
         }
         IntVar(node)
     }
@@ -104,7 +121,10 @@ impl SchedulingTheory {
             true
         } else {
             let sums = &mut self.sum_watcher;
-            let result = self.graph.enable_edge_cb(edge, |nd,a,b| sums.notify(nd,a,b)).is_ok();
+            let result = self
+                .graph
+                .enable_edge_cb(edge, |nd, a, b| sums.notify(nd, a, b))
+                .is_ok();
             result
         }
     }
@@ -123,7 +143,10 @@ impl Theory for SchedulingTheory {
         for lit in lits {
             if let Some(edge) = self.condition_edge.get(lit) {
                 let sums = &mut self.sum_watcher;
-                if let Err(cycle) = self.graph.enable_edge_cb(*edge, |nd,a,b| sums.notify(nd,a,b)) {
+                if let Err(cycle) = self
+                    .graph
+                    .enable_edge_cb(*edge, |nd, a, b| sums.notify(nd, a, b))
+                {
                     let map = &self.edge_condition;
                     let cycle = cycle.filter_map(|edge| map.get(&edge)).map(|lit| !*lit);
 
@@ -138,6 +161,25 @@ impl Theory for SchedulingTheory {
                 } else {
                     self.trail.push(*edge);
                 }
+
+                // Check sum constraints
+
+                for sumref in self.sum_watcher.get_violations() {
+                    let sum = &self.sum_watcher.sum_constraints[sumref.idx()];
+                    let critical_set = self.graph.critical_set(sum.nodes.iter().cloned());
+                    let map = &self.edge_condition;
+                    let reason = critical_set.filter_map(|edge| map.get(&edge)).map(|lit| !*lit);
+                    let clause = std::iter::once(!sum.lit).chain(reason);
+                    buf.add_clause(clause);
+
+                    #[cfg(debug_assertions)]
+                    {
+                        self.requires_backtrack = true;
+                    }
+
+                    return;
+                }
+
             } else {
                 println!("irrelevant lit {:?}", lit);
             }
@@ -176,8 +218,11 @@ impl Theory for SchedulingTheory {
                 );
             }
 
-            self.graph
-                .disable_edges(self.trail.drain(self.trail_lim[level as usize]..));
+            let sums = &mut self.sum_watcher;
+            self.graph.disable_edges_cb(
+                self.trail.drain(self.trail_lim[level as usize]..),
+                |nd, a, b| sums.notify(nd, a, b),
+            );
             self.trail_lim.truncate(level as usize);
         }
     }
@@ -266,20 +311,27 @@ impl SchedulingSolver {
         None
     }
 
-    pub fn new_sum_constraint(&mut self, bound :u32) -> SumRef {
-      assert!(self.prop.theory.trail_lim.len() == 0);
-      let ref_ = SumRef(self.prop.theory.sum_watcher.sum_constraints.len());
-      let lit = self.new_bool();
-      self.prop.theory.sum_watcher.sum_constraints.push(Sum { lit, bound, current_value: 0 });
-      ref_
+    pub fn new_sum_constraint(&mut self, bound: u32) -> SumRef {
+        assert!(self.prop.theory.trail_lim.len() == 0);
+        let ref_ = SumRef(self.prop.theory.sum_watcher.sum_constraints.len() as u32);
+        let lit = self.new_bool();
+        self.prop.theory.sum_watcher.sum_constraints.push(Sum {
+            nodes : SmallVec::new(),
+            lit,
+            bound,
+            current_value: 0, min_violation: u32::MAX,
+        });
+        ref_
     }
 
-    pub fn add_constraint_coeff(&mut self, sum :SumRef, IntVar(node) :IntVar, coeff :i32) {
-      assert!(self.prop.theory.trail_lim.len() == 0);
-      let component = NodeSumRef { sum, coeff };
-      let value = self.prop.theory.graph.value(node) * coeff;
-      self.prop.theory.sum_watcher.node_constraints[node.idx()].push(component);
-      self.prop.theory.sum_watcher.sum_constraints[sum.idx()].current_value += value;
+    pub fn add_constraint_coeff(&mut self, sumref: SumRef, IntVar(node): IntVar, coeff: i32) {
+        assert!(self.prop.theory.trail_lim.len() == 0);
+        let component = NodeSumRef { sumref, coeff };
+        let value = self.prop.theory.graph.value(node) * coeff;
+        self.prop.theory.sum_watcher.node_constraints[node.idx()].push(component);
+        let sum = &mut self.prop.theory.sum_watcher.sum_constraints[sumref.idx()];
+        sum.current_value += value;
+        sum.nodes.push(node);
     }
 }
 
