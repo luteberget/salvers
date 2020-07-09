@@ -98,6 +98,19 @@ impl LongestPaths {
         CriticalPathIterator { graph: self, node }
     }
 
+    pub fn critical_set<'a>(&'a self, nodes :impl IntoIterator<Item = Node>) -> impl Iterator<Item = Edge> + 'a {
+        // Assuming here that self.values is a topological ordering.
+        // That only works if we have no negative-time edges (?).
+        let mut heap = OrderHeap::new();
+        for node in nodes.into_iter() {
+            debug_assert!(!heap.contains(node.0 as i32));
+            let values = &self.values;
+            heap.insert(node.0 as i32, |n| -values[*n as usize] /* largest first */);
+        }
+
+        CriticalSetIterator { graph: self, heap }
+    }
+
     pub fn enable_edge<'a>(&'a mut self, edge: Edge) -> Result<(), CycleIterator<'a>> {
         self.enable_edge_cb(edge, |_, _, _| {})
     }
@@ -318,7 +331,7 @@ impl LongestPaths {
                         new_value
                     );
                     event(Node(edge.target), old_value, new_value);
-                    
+
                     // Add outgoing edges to the update queue.
                     for next_edge_idx in self.node_outgoing[edge.target as usize].iter() {
                         if self.edge_data[*next_edge_idx as usize].source < 0 {
@@ -393,6 +406,33 @@ impl<'a> Iterator for CriticalPathIterator<'a> {
         }
     }
 }
+
+pub struct CriticalSetIterator<'a> {
+    graph :&'a LongestPaths,
+    heap: OrderHeap,
+}
+
+impl<'a> Iterator for CriticalSetIterator<'a> {
+    type Item = Edge;
+
+    fn next(&mut self) -> Option<Edge> {
+        let values = &self.graph.values;
+        if let Some(node_idx) = self.heap.remove_min(|n| -values[*n as usize]) {
+            let edge_idx = self.graph.node_updated_from[node_idx as usize];
+            if edge_idx != -1 {
+                let edge = &self.graph.edge_data[edge_idx as usize];
+                debug_assert!(edge.source > 0); // is enabled
+                let values = &self.graph.values;
+                if !self.heap.contains(edge_idx) {
+                    self.heap.insert(edge_idx, |n| -values[*n as usize]);
+                }
+                return Some(Edge(edge_idx as u32));
+            }
+        }
+        None
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -524,4 +564,28 @@ mod tests {
         assert_eq!(lp.value(n3), 5);
         assert_eq!(lp.value(n4), 10);
     }
+
+    #[test]
+    fn critical_set() {
+        let mut lp = LongestPaths::new();
+
+        let n1 = lp.new_node();
+        let n2 = lp.new_node();
+        let n3 = lp.new_node();
+        let n4 = lp.new_node();
+
+        let e1 = lp.new_edge(n1,n2, 5);
+        let e2 = lp.new_edge(n2,n3, 5);
+        let e3 = lp.new_edge(n2,n4, 6);
+
+        assert!(lp.enable_edge(e3).is_ok());
+        assert!(lp.enable_edge(e2).is_ok());
+        assert!(lp.enable_edge(e1).is_ok());
+
+        let critical_set = lp.critical_set(vec![n3,n4]).collect::<Vec<Edge>>();
+        assert_eq!(critical_set, vec![e3,e2,e1]);
+
+
+    }
+
 }
