@@ -18,10 +18,10 @@ fn rclike() {
     let (cost, model) = s.optimize().unwrap();
     println!(" ** DONE ");
     println!("cost {}", cost);
-    println!("x={} y={} z={}", 
-             model.get_int_value(x),
-             model.get_int_value(y),
-             model.get_int_value(z));
-
-
+    println!(
+        "x={} y={} z={}",
+        model.get_int_value(x),
+        model.get_int_value(y),
+        model.get_int_value(z)
+    );
 }

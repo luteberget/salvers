@@ -48,7 +48,12 @@ impl SumWatcher {
         }
     }
 
-    fn set_sum_value(sums :&mut Vec<Sum>, violations :&mut Vec<SumRef>, sumref :SumRef, new_value :i32) {
+    fn set_sum_value(
+        sums: &mut Vec<Sum>,
+        violations: &mut Vec<SumRef>,
+        sumref: SumRef,
+        new_value: i32,
+    ) {
         let sum = &mut sums[sumref.idx()];
 
         // remove previous violation
@@ -66,11 +71,20 @@ impl SumWatcher {
         }
     }
 
-    fn evaluate(&mut self, sumref :SumRef, nodes :impl Fn(&Node) -> i32) {
+    fn evaluate(&mut self, sumref: SumRef, nodes: impl Fn(&Node) -> i32) {
         let sum = &self.sum_constraints[sumref.idx()];
-        let new_value = sum.nodes.iter().map(|(n,coeff)| nodes(n) * coeff).sum::<i32>();
+        let new_value = sum
+            .nodes
+            .iter()
+            .map(|(n, coeff)| nodes(n) * coeff)
+            .sum::<i32>();
         println!("evaluating {} @ {:?}", new_value, sum);
-        Self::set_sum_value(&mut self.sum_constraints, &mut self.violations, sumref, new_value);
+        Self::set_sum_value(
+            &mut self.sum_constraints,
+            &mut self.violations,
+            sumref,
+            new_value,
+        );
         println!("after evaluating, violations: {:?}", self.violations);
     }
 
@@ -80,7 +94,12 @@ impl SumWatcher {
         for NodeSumRef { sumref, coeff } in self.node_constraints[node.idx()].iter() {
             let sum = &mut self.sum_constraints[sumref.idx()];
             let new_value = sum.current_value + coeff * (new - old);
-            Self::set_sum_value(&mut self.sum_constraints, &mut self.violations, *sumref, new_value);
+            Self::set_sum_value(
+                &mut self.sum_constraints,
+                &mut self.violations,
+                *sumref,
+                new_value,
+            );
         }
     }
 
@@ -160,12 +179,36 @@ impl SchedulingTheory {
 
 impl Theory for SchedulingTheory {
     fn check(&mut self, ch: Check, lits: &[Lit], buf: &mut Refinement) {
+        println!("Check {:?} {:?}", ch, lits);
         #[cfg(debug_assertions)]
         assert!(!self.requires_backtrack);
 
         if self.invalidate_model {
             self.invalidate_model = false;
             self.model = None;
+        }
+
+        for sumref in self.sum_watcher.violations.drain(..) {
+            let sum = &self.sum_watcher.sum_constraints[sumref.idx()];
+            let critical_set = self.graph.critical_set(sum.nodes.iter().map(|(n, _)| *n));
+            let map = &self.edge_condition;
+            let reason = critical_set
+                .filter_map(|edge| map.get(&edge))
+                .map(|lit| !*lit);
+            let clause = std::iter::once(!sum.lit).chain(reason);
+
+            let clause = clause.collect::<Vec<_>>();
+            println!("SUMWATCHER Adding clause {:?}", clause);
+
+            buf.add_clause(clause);
+
+            //// Doesn't necessarily require backtrack... (?)
+            //#[cfg(debug_assertions)]
+            //{
+            //    self.requires_backtrack = true;
+            //}
+
+            //return;
         }
 
         for lit in lits {
@@ -190,13 +233,7 @@ impl Theory for SchedulingTheory {
                     self.trail.push(*edge);
                 }
 
-            } else {
-                println!("irrelevant lit {:?}", lit);
-            }
-
-        }
-
-                for sumref in self.sum_watcher.get_violations() {
+                for sumref in self.sum_watcher.violations.drain(..) {
                     let sum = &self.sum_watcher.sum_constraints[sumref.idx()];
                     let critical_set = self.graph.critical_set(sum.nodes.iter().map(|(n, _)| *n));
                     let map = &self.edge_condition;
@@ -206,11 +243,11 @@ impl Theory for SchedulingTheory {
                     let clause = std::iter::once(!sum.lit).chain(reason);
 
                     let clause = clause.collect::<Vec<_>>();
-                    println!("Adding clause {:?}", clause);
+                    println!("SUMWATCHER Adding clause {:?}", clause);
 
                     buf.add_clause(clause);
 
-                    // Doesn't necessarily require backtrack...
+                    //// Doesn't necessarily require backtrack... (?)
                     //#[cfg(debug_assertions)]
                     //{
                     //    self.requires_backtrack = true;
@@ -218,6 +255,10 @@ impl Theory for SchedulingTheory {
 
                     //return;
                 }
+            } else {
+                println!("irrelevant lit {:?}", lit);
+            }
+        }
 
         if let Check::Final = ch {
             // If we get here, the problem is SAT, so we preserve the model before backtracking.
@@ -386,7 +427,10 @@ impl SchedulingSolver {
             sum.nodes.push((node, coeff));
         }
         let graph = &self.prop.theory.graph;
-        self.prop.theory.sum_watcher.evaluate(sumref, |n| graph.value(*n));
+        self.prop
+            .theory
+            .sum_watcher
+            .evaluate(sumref, |n| graph.value(*n));
     }
 
     pub fn optimize<'a>(&'a mut self) -> Result<(i32, Model<'a>), ()> {
@@ -419,8 +463,10 @@ impl SchedulingSolver {
                     let core = core.collect::<Vec<_>>();
                     drop(result);
 
-                    println!("got core {} {:?}", core.len(),core);
-                    if core.len() == 0 { return Err(()); }
+                    println!("got core {} {:?}", core.len(), core);
+                    if core.len() == 0 {
+                        return Err(());
+                    }
 
                     let mut min_weight = u32::MAX;
                     let mut sum_bound = 0;
@@ -450,7 +496,10 @@ impl SchedulingSolver {
                         self.prop.theory.sum_by_lit.insert(new_lit, sumref);
 
                         let graph = &self.prop.theory.graph;
-                        self.prop.theory.sum_watcher.evaluate(sumref, |v| graph.value(*v) );
+                        self.prop
+                            .theory
+                            .sum_watcher
+                            .evaluate(sumref, |v| graph.value(*v));
 
                         // The main weakness I see here is that we forget about the `lit` which we
                         // have already learnt a lot about from conflicts. Those clauses become wasted.
