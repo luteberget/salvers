@@ -18,17 +18,19 @@ impl SumRef {
     }
 }
 
+#[derive(Debug)]
 struct NodeSumRef {
     sumref: SumRef,
     coeff: i32,
 }
 
+#[derive(Debug)]
 struct Sum {
     lit: Lit,
     bound: u32,
     current_value: i32,
-    min_violation :u32,
-    nodes :SmallVec<[(Node,i32);4]>,
+    min_violation: u32,
+    nodes: SmallVec<[(Node, i32); 4]>,
 }
 
 struct SumWatcher {
@@ -46,25 +48,39 @@ impl SumWatcher {
         }
     }
 
-    fn notify(&mut self, node: Node, old: i32, new :i32) {
-        println!("notify {:?} {} {}", node, old, new);
-        for NodeSumRef { sumref, coeff } in self.node_constraints[node.idx()].iter() {
+    fn set_sum_value(sums :&mut Vec<Sum>, violations :&mut Vec<SumRef>, sumref :SumRef, new_value :i32) {
+        let sum = &mut sums[sumref.idx()];
 
+        // remove previous violation
+        if !(new_value > sum.bound as i32) {
+            println!("removing violation");
+            violations.retain(|x| *x != sumref);
+        }
+
+        sum.current_value = new_value;
+
+        if new_value > sum.bound as i32 {
+            println!("Adding violation {:?}", sumref);
+            violations.push(sumref);
+            sum.min_violation = sum.min_violation.min(sum.current_value as u32 - sum.bound);
+        }
+    }
+
+    fn evaluate(&mut self, sumref :SumRef, nodes :impl Fn(&Node) -> i32) {
+        let sum = &self.sum_constraints[sumref.idx()];
+        let new_value = sum.nodes.iter().map(|(n,coeff)| nodes(n) * coeff).sum::<i32>();
+        println!("evaluating {} @ {:?}", new_value, sum);
+        Self::set_sum_value(&mut self.sum_constraints, &mut self.violations, sumref, new_value);
+        println!("after evaluating, violations: {:?}", self.violations);
+    }
+
+    fn notify(&mut self, node: Node, old: i32, new: i32) {
+        println!("notify {:?} {} {}", node, old, new);
+        println!("  - constraints {:?}", self.node_constraints[node.idx()]);
+        for NodeSumRef { sumref, coeff } in self.node_constraints[node.idx()].iter() {
             let sum = &mut self.sum_constraints[sumref.idx()];
             let new_value = sum.current_value + coeff * (new - old);
-
-            // remove previous violation
-            if sum.current_value > sum.bound as i32 && !(new_value > sum.bound as i32) {
-                self.violations.retain(|x| x != sumref);
-            }
-
-            sum.current_value = new_value;
-
-            if new_value > sum.bound as i32 {
-                println!("Adding violation {:?}", sumref);
-                self.violations.push(*sumref);
-                sum.min_violation = sum.min_violation.min(sum.current_value as u32 - sum.bound);
-            }
+            Self::set_sum_value(&mut self.sum_constraints, &mut self.violations, *sumref, new_value);
         }
     }
 
@@ -85,7 +101,7 @@ struct SchedulingTheory {
     invalidate_model: bool,
 
     sum_watcher: SumWatcher,
-    sum_by_lit :HashMap<Lit, SumRef>,
+    sum_by_lit: HashMap<Lit, SumRef>,
 
     trail: Vec<Edge>,
     trail_lim: Vec<usize>,
@@ -174,28 +190,34 @@ impl Theory for SchedulingTheory {
                     self.trail.push(*edge);
                 }
 
-                // Check sum constraints
-
-                for sumref in self.sum_watcher.get_violations() {
-                    let sum = &self.sum_watcher.sum_constraints[sumref.idx()];
-                    let critical_set = self.graph.critical_set(sum.nodes.iter().map(|(n,_)| *n));
-                    let map = &self.edge_condition;
-                    let reason = critical_set.filter_map(|edge| map.get(&edge)).map(|lit| !*lit);
-                    let clause = std::iter::once(!sum.lit).chain(reason);
-                    buf.add_clause(clause);
-
-                    #[cfg(debug_assertions)]
-                    {
-                        self.requires_backtrack = true;
-                    }
-
-                    return;
-                }
-
             } else {
                 println!("irrelevant lit {:?}", lit);
             }
+
         }
+
+                for sumref in self.sum_watcher.get_violations() {
+                    let sum = &self.sum_watcher.sum_constraints[sumref.idx()];
+                    let critical_set = self.graph.critical_set(sum.nodes.iter().map(|(n, _)| *n));
+                    let map = &self.edge_condition;
+                    let reason = critical_set
+                        .filter_map(|edge| map.get(&edge))
+                        .map(|lit| !*lit);
+                    let clause = std::iter::once(!sum.lit).chain(reason);
+
+                    let clause = clause.collect::<Vec<_>>();
+                    println!("Adding clause {:?}", clause);
+
+                    buf.add_clause(clause);
+
+                    // Doesn't necessarily require backtrack...
+                    //#[cfg(debug_assertions)]
+                    //{
+                    //    self.requires_backtrack = true;
+                    //}
+
+                    //return;
+                }
 
         if let Check::Final = ch {
             // If we get here, the problem is SAT, so we preserve the model before backtracking.
@@ -323,10 +345,14 @@ impl SchedulingSolver {
         None
     }
 
-    pub fn delete_sum_constraint(&mut self, sumref :SumRef) {
+    pub fn delete_sum_constraint(&mut self, sumref: SumRef) {
         assert!(self.prop.theory.trail_lim.len() == 0);
-        for (node,_) in self.prop.theory.sum_watcher.sum_constraints[sumref.idx()].nodes.iter() {
-            self.prop.theory.sum_watcher.node_constraints[node.idx()].retain(|n| n.sumref != sumref);
+        for (node, _) in self.prop.theory.sum_watcher.sum_constraints[sumref.idx()]
+            .nodes
+            .iter()
+        {
+            self.prop.theory.sum_watcher.node_constraints[node.idx()]
+                .retain(|n| n.sumref != sumref);
         }
         let lit = self.prop.theory.sum_watcher.sum_constraints[sumref.idx()].lit;
         self.add_clause(&vec![!lit]);
@@ -334,17 +360,18 @@ impl SchedulingSolver {
         debug_assert!(remove.is_some());
     }
 
-    pub fn new_sum_constraint(&mut self, lit :Lit, bound: u32) -> SumRef {
+    pub fn new_sum_constraint(&mut self, lit: Lit, bound: u32) -> SumRef {
         assert!(self.prop.theory.trail_lim.len() == 0);
         let sumref = SumRef(self.prop.theory.sum_watcher.sum_constraints.len() as u32);
         self.prop.theory.sum_watcher.sum_constraints.push(Sum {
-            nodes : SmallVec::new(),
+            nodes: SmallVec::new(),
             lit,
             bound,
-            current_value: 0, min_violation: u32::MAX,
+            current_value: 0,
+            min_violation: u32::MAX,
         });
         self.prop.theory.sum_by_lit.insert(lit, sumref);
-        sumref 
+        sumref
     }
 
     pub fn add_constraint_coeff(&mut self, sumref: SumRef, IntVar(node): IntVar, coeff: i32) {
@@ -353,71 +380,94 @@ impl SchedulingSolver {
         let value = self.prop.theory.graph.value(node) * coeff;
         self.prop.theory.sum_watcher.node_constraints[node.idx()].push(component);
         let sum = &mut self.prop.theory.sum_watcher.sum_constraints[sumref.idx()];
-        sum.current_value += value;
-        if let Some((_n,c)) = sum.nodes.iter_mut().find(|(n,_)| *n == node) {
+        if let Some((_n, c)) = sum.nodes.iter_mut().find(|(n, _)| *n == node) {
             *c += coeff;
         } else {
-            sum.nodes.push((node,coeff));
+            sum.nodes.push((node, coeff));
         }
+        let graph = &self.prop.theory.graph;
+        self.prop.theory.sum_watcher.evaluate(sumref, |n| graph.value(*n));
     }
 
-    pub fn optimize<'a>(&'a mut self) -> Result<(i32,Model<'a>), ()>{
-        // RC2-like algorithm, except that the constraints are not relaxable, 
+    pub fn optimize<'a>(&'a mut self) -> Result<(i32, Model<'a>), ()> {
+        // RC2-like algorithm, except that the constraints are not relaxable,
         // and they are implemented as a theory using diff constraints scheduling/longest paths.
 
-        let mut cost : i32 = 0;
+        let mut cost: i32 = 0;
 
         loop {
-
             // Assume all the sum constraints.
             // TODO don't copy the assumption lits, somehow.
-            let assumptions = self.prop.theory.sum_watcher.sum_constraints.iter().map(|s| s.lit).collect::<Vec<Lit>>();
+            let assumptions = self
+                .prop
+                .theory
+                .sum_watcher
+                .sum_constraints
+                .iter()
+                .map(|s| s.lit)
+                .collect::<Vec<Lit>>();
+            println!("solving with assumptions {:?}", assumptions);
             let mut result = self.solve_with_assumptions(&assumptions);
             match result {
                 Ok(_) => {
                     drop(result);
                     let model = self.get_model().unwrap();
                     return Ok((cost, model));
-                },
+                }
                 Err(ref mut core) => {
                     // Some of them are not satisifable
                     let core = core.collect::<Vec<_>>();
                     drop(result);
 
+                    println!("got core {} {:?}", core.len(),core);
+                    if core.len() == 0 { return Err(()); }
+
                     let mut min_weight = u32::MAX;
                     let mut sum_bound = 0;
                     let mut components = Vec::new();
                     for lit in core.iter() {
-                        let new_lit = self.new_bool();
                         let sumref = self.prop.theory.sum_by_lit[lit];
                         let sum = &mut self.prop.theory.sum_watcher.sum_constraints[sumref.idx()];
                         min_weight = min_weight.min(sum.min_violation);
-                        for (nd,c) in sum.nodes.iter() {
-                            components.push((*nd,*c));
+                    }
+
+                    for lit in core.iter() {
+                        let new_lit = self.new_bool();
+                        let sumref = self.prop.theory.sum_by_lit[lit];
+                        let sum = &mut self.prop.theory.sum_watcher.sum_constraints[sumref.idx()];
+                        sum.bound += min_weight;
+
+                        for (nd, c) in sum.nodes.iter() {
+                            components.push((*nd, *c));
                         }
 
-                        // Instead of deleting this constraint and adding a new one, let's just 
+                        // Instead of deleting this constraint and adding a new one, let's just
                         // increase the bound and find a new lit.
                         //self.delete_sum_constraint(sumref);
                         sum.lit = new_lit;
                         sum_bound += sum.bound;
-                    }
+                        self.prop.theory.sum_by_lit.remove(lit);
+                        self.prop.theory.sum_by_lit.insert(new_lit, sumref);
 
-                    for lit in core.iter() {
-                        let sumref = self.prop.theory.sum_by_lit[lit];
-                        let sum = &mut self.prop.theory.sum_watcher.sum_constraints[sumref.idx()];
-                        sum.bound += min_weight;
+                        let graph = &self.prop.theory.graph;
+                        self.prop.theory.sum_watcher.evaluate(sumref, |v| graph.value(*v) );
+
+                        // The main weakness I see here is that we forget about the `lit` which we
+                        // have already learnt a lot about from conflicts. Those clauses become wasted.
                     }
 
                     cost += min_weight as i32;
-
+                    println!("increased cost by {} to {}", min_weight, cost);
                     debug_assert!(min_weight < u32::MAX);
-                    let sum_bool = self.new_bool();
-                    let new_sum = self.new_sum_constraint(sum_bool, sum_bound + min_weight);
-                    for (nd,c) in components {
-                        self.add_constraint_coeff(new_sum, IntVar(nd), c);
+
+                    if core.len() > 1 {
+                        let sum_bool = self.new_bool();
+                        let new_sum = self.new_sum_constraint(sum_bool, sum_bound + min_weight);
+                        for (nd, c) in components {
+                            self.add_constraint_coeff(new_sum, IntVar(nd), c);
+                        }
                     }
-                },
+                }
             }
         }
     }

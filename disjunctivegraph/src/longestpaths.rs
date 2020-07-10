@@ -98,14 +98,20 @@ impl LongestPaths {
         CriticalPathIterator { graph: self, node }
     }
 
-    pub fn critical_set<'a>(&'a self, nodes :impl IntoIterator<Item = Node>) -> impl Iterator<Item = Edge> + 'a {
+    pub fn critical_set<'a>(
+        &'a self,
+        nodes: impl IntoIterator<Item = Node>,
+    ) -> impl Iterator<Item = Edge> + 'a {
         // Assuming here that self.values is a topological ordering.
         // That only works if we have no negative-time edges (?).
         let mut heap = OrderHeap::new();
         for node in nodes.into_iter() {
             debug_assert!(!heap.contains(node.0 as i32));
             let values = &self.values;
-            heap.insert(node.0 as i32, |n| -values[*n as usize] /* largest first */);
+            heap.insert(
+                node.0 as i32,
+                |n| -values[*n as usize], /* largest first */
+            );
         }
 
         CriticalSetIterator { graph: self, heap }
@@ -408,7 +414,7 @@ impl<'a> Iterator for CriticalPathIterator<'a> {
 }
 
 pub struct CriticalSetIterator<'a> {
-    graph :&'a LongestPaths,
+    graph: &'a LongestPaths,
     heap: OrderHeap,
 }
 
@@ -432,7 +438,6 @@ impl<'a> Iterator for CriticalSetIterator<'a> {
         None
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -574,18 +579,15 @@ mod tests {
         let n3 = lp.new_node();
         let n4 = lp.new_node();
 
-        let e1 = lp.new_edge(n1,n2, 5);
-        let e2 = lp.new_edge(n2,n3, 5);
-        let e3 = lp.new_edge(n2,n4, 6);
+        let e1 = lp.new_edge(n1, n2, 5);
+        let e2 = lp.new_edge(n2, n3, 5);
+        let e3 = lp.new_edge(n2, n4, 6);
 
         assert!(lp.enable_edge(e3).is_ok());
         assert!(lp.enable_edge(e2).is_ok());
         assert!(lp.enable_edge(e1).is_ok());
 
-        let critical_set = lp.critical_set(vec![n3,n4]).collect::<Vec<Edge>>();
-        assert_eq!(critical_set, vec![e3,e2,e1]);
-
-
+        let critical_set = lp.critical_set(vec![n3, n4]).collect::<Vec<Edge>>();
+        assert_eq!(critical_set, vec![e3, e2, e1]);
     }
-
 }
