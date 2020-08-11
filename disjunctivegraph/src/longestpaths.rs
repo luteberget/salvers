@@ -433,9 +433,10 @@ impl<'a> Iterator for CriticalSetIterator<'a> {
                 let edge = &self.graph.edge_data[edge_idx as usize];
                 debug_assert!(edge.source > 0); // is enabled
                 let values = &self.graph.values;
-                if !self.heap.contains(edge_idx) {
-                    self.heap.insert(edge_idx, |n| -values[*n as usize]);
+                if !self.heap.contains(edge.source) {
+                    self.heap.insert(edge.source, |n| -values[*n as usize]);
                 }
+                //println!(" yield edege_idx {:?}", edge_idx);
                 return Some(Edge(edge_idx as u32));
             }
         }
