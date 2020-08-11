@@ -1176,7 +1176,7 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     fn cancel_until(&mut self, level: i32) {
-        println!(" --> CANCEL_UNTIL(level={})", level);
+        //println!(" --> CANCEL_UNTIL(level={})", level);
         if self.trail_lim.len() > level as usize {
             let mut c = (self.trail.len() - 1) as i32;
             while c >= self.trail_lim[level as usize] {

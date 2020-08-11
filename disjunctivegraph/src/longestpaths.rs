@@ -128,9 +128,11 @@ impl LongestPaths {
     ) -> Result<(), CycleIterator<'a>> {
         let edge = &mut self.edge_data[add_idx as usize];
 
+        //let mut debug = false; if add_idx == 6 { println!("adding edge 6"); debug=true; }
+
         let was_already_enabled = edge.source > 0;
         if was_already_enabled {
-            println!("enable_edge: was already enabled");
+            //println!("enable_edge: was already enabled");
             return Ok(());
         }
         // Enable edge
@@ -139,13 +141,13 @@ impl LongestPaths {
         let is_critical =
             self.values[edge.source as usize] + edge.distance > self.values[edge.target as usize];
         if !is_critical {
-            println!("enable_edge: was not critical");
-            println!(" edge: {:?}", edge);
-            println!(" values: {:?}", self.values);
+            //println!("enable_edge: was not critical");
+            //println!(" edge: {:?}", edge);
+            //println!(" values: {:?}", self.values);
             return Ok(());
         }
 
-        println!("enable_edge: nontrivial");
+        //println!("enable_edge: nontrivial");
         self.current_updates.clear();
         debug_assert!(self.queue.is_empty());
         {
@@ -164,7 +166,7 @@ impl LongestPaths {
                 .remove_min(|i| values[edges[*i as usize].target as usize])
         } {
             let edge = &self.edge_data[edge_idx as usize];
-            println!("Enabling edge {:?}", edge);
+            //if debug { println!("Enabling edge {:?}", edge); }
             let target_updated = self.values[edge.source as usize] + edge.distance
                 > self.values[edge.target as usize];
 
@@ -197,15 +199,16 @@ impl LongestPaths {
                 let old_value = self.values[edge.target as usize];
                 let new_value = self.values[edge.source as usize] + edge.distance;
                 self.values[edge.target as usize] = new_value;
-                println!(
-                    "enable: setting {:?} from {} to {}",
-                    Node(edge.target),
-                    old_value,
-                    new_value
-                );
+                //if debug { println!(
+                //    "enable: setting {:?} from {} to {}",
+                //    Node(edge.target),
+                //    old_value,
+                //    new_value
+                //); }
                 event(Node(edge.target), old_value, new_value);
 
                 self.node_updated_from[edge.target as usize] = edge_idx;
+                //if debug { println!("edge.target {} updated from {}", edge.target, edge_idx); }
 
                 for next_edge_idx in self.node_outgoing[edge.target as usize].iter() {
                     if self.edge_data[*next_edge_idx as usize].source < 0 {
@@ -235,6 +238,7 @@ impl LongestPaths {
         edges: impl IntoIterator<Item = Edge>,
         mut event: impl FnMut(Node, i32, i32),
     ) {
+        //panic!();
         debug_assert!(self.queue.is_empty());
 
         // Add the edges-to-be-disabled to the heap.
@@ -247,7 +251,7 @@ impl LongestPaths {
             // Was it already disabled?
             let was_enabled = edge.source > 0;
             if !was_enabled {
-                println!("disable {:?}: was already enabled", edge_idx);
+                //println!("disable {:?}: was already enabled", edge_idx);
                 continue;
             }
             edge.source *= -1;
@@ -255,7 +259,7 @@ impl LongestPaths {
             let is_not_critical = self.values[-edge.source as usize] + edge.distance
                 < self.values[edge.target as usize];
             if is_not_critical {
-                println!("disable {:?}: was not critical", edge_idx);
+                //println!("disable {:?}: was not critical", edge_idx);
                 continue;
             }
 
@@ -264,14 +268,14 @@ impl LongestPaths {
             }
             let values = &self.values;
             let edges = &self.edge_data;
-            println!("adding to queue {:?}", edge_idx);
+            //println!("adding to queue {:?}", edge_idx);
             j += 1;
             self.queue.insert(edge_idx as i32, |i| {
                 values[edges[*i as usize].target as usize]
             });
         }
 
-        println!("disabling {}/{} edges", j, i);
+        //println!("disabling {}/{} edges", j, i);
 
         while let Some(edge_idx) = {
             let values = &self.values;
@@ -288,12 +292,12 @@ impl LongestPaths {
             //);
 
             let is_critical = self.node_updated_from[edge.target as usize] == edge_idx;
-            println!(
-                "popping heap: is edge {:?} critical: {:?}",
-                edge, is_critical
-            );
-            println!("  node updated from: {:?}", self.node_updated_from);
-            println!("  values: {:?}", self.values);
+            //println!(
+            //    "popping heap: is edge {:?} critical: {:?}",
+            //    edge, is_critical
+            //);
+            //println!("  node updated from: {:?}", self.node_updated_from);
+            //println!("  values: {:?}", self.values);
             if is_critical {
                 //let edge_min_value = self.values[edge.source.abs() as usize] + edge.distance;
 
@@ -330,12 +334,12 @@ impl LongestPaths {
                 if new_value < old_value {
                     // Update the value
                     self.values[edge.target as usize] = new_value;
-                    println!(
-                        "disable: setting {:?} from {} to {}",
-                        Node(edge.target),
-                        old_value,
-                        new_value
-                    );
+                    //println!(
+                    //    "disable: setting {:?} from {} to {}",
+                    //    Node(edge.target),
+                    //    old_value,
+                    //    new_value
+                    //);
                     event(Node(edge.target), old_value, new_value);
 
                     // Add outgoing edges to the update queue.
@@ -355,7 +359,7 @@ impl LongestPaths {
                 }
             }
         }
-        println!("  disable-final-values: {:?}", self.values);
+        //println!("  disable-final-values: {:?}", self.values);
     }
 }
 

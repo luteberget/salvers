@@ -58,14 +58,14 @@ impl SumWatcher {
 
         // remove previous violation
         if !(new_value > sum.bound as i32) {
-            println!("removing violation");
+            //println!("removing violation");
             violations.retain(|x| *x != sumref);
         }
 
         sum.current_value = new_value;
 
         if new_value > sum.bound as i32 {
-            println!("Adding violation {:?}", sumref);
+            //println!("Adding violation {:?}", sumref);
             violations.push(sumref);
             sum.min_violation = sum.min_violation.min(sum.current_value as u32 - sum.bound);
         }
@@ -78,19 +78,19 @@ impl SumWatcher {
             .iter()
             .map(|(n, coeff)| nodes(n) * coeff)
             .sum::<i32>();
-        println!("evaluating {} @ {:?}", new_value, sum);
+        //println!("evaluating {} @ {:?}", new_value, sum);
         Self::set_sum_value(
             &mut self.sum_constraints,
             &mut self.violations,
             sumref,
             new_value,
         );
-        println!("after evaluating, violations: {:?}", self.violations);
+        //println!("after evaluating, violations: {:?}", self.violations);
     }
 
     fn notify(&mut self, node: Node, old: i32, new: i32) {
-        println!("notify {:?} {} {}", node, old, new);
-        println!("  - constraints {:?}", self.node_constraints[node.idx()]);
+        //println!("notify {:?} {} {}", node, old, new);
+        //println!("  - constraints {:?}", self.node_constraints[node.idx()]);
         for NodeSumRef { sumref, coeff } in self.node_constraints[node.idx()].iter() {
             let sum = &mut self.sum_constraints[sumref.idx()];
             let new_value = sum.current_value + coeff * (new - old);
@@ -103,9 +103,9 @@ impl SumWatcher {
         }
     }
 
-    fn get_violations(&self) -> &[SumRef] {
-        &self.violations
-    }
+//    fn get_violations(&self) -> &[SumRef] {
+//        &self.violations
+//    }
 }
 
 struct SchedulingTheory {
@@ -179,7 +179,7 @@ impl SchedulingTheory {
 
 impl Theory for SchedulingTheory {
     fn check(&mut self, ch: Check, lits: &[Lit], buf: &mut Refinement) {
-        println!("Check {:?} {:?}", ch, lits);
+        //println!("Check {:?} {:?}", ch, lits);
         #[cfg(debug_assertions)]
         assert!(!self.requires_backtrack);
 
@@ -189,6 +189,7 @@ impl Theory for SchedulingTheory {
         }
 
         for sumref in self.sum_watcher.violations.drain(..) {
+            //println!("sumref {:?}", sumref);
             let sum = &self.sum_watcher.sum_constraints[sumref.idx()];
             let critical_set = self.graph.critical_set(sum.nodes.iter().map(|(n, _)| *n));
             let map = &self.edge_condition;
@@ -197,8 +198,10 @@ impl Theory for SchedulingTheory {
                 .map(|lit| !*lit);
             let clause = std::iter::once(!sum.lit).chain(reason);
 
+            //println!("iter critical set...");
             let clause = clause.collect::<Vec<_>>();
-            println!("SUMWATCHER Adding clause {:?}", clause);
+            //println!("SUMWATCHER Adding clause {:?}", clause);
+            //println!("iter critical set done");
 
             buf.add_clause(clause);
 
@@ -210,6 +213,7 @@ impl Theory for SchedulingTheory {
 
             //return;
         }
+            //println!("sumref done.");
 
         for lit in lits {
             if let Some(edge) = self.condition_edge.get(lit) {
@@ -243,7 +247,7 @@ impl Theory for SchedulingTheory {
                     let clause = std::iter::once(!sum.lit).chain(reason);
 
                     let clause = clause.collect::<Vec<_>>();
-                    println!("SUMWATCHER Adding clause {:?}", clause);
+                    //println!("SUMWATCHER Adding clause {:?}", clause);
 
                     buf.add_clause(clause);
 
@@ -256,18 +260,20 @@ impl Theory for SchedulingTheory {
                     //return;
                 }
             } else {
-                println!("irrelevant lit {:?}", lit);
+                //println!("irrelevant lit {:?}", lit);
             }
         }
 
         if let Check::Final = ch {
             // If we get here, the problem is SAT, so we preserve the model before backtracking.
-            println!("Theory: FINAL SAT");
+            //println!("Theory: FINAL SAT");
             if !self.model.is_some() {
-                println!("extracting values");
+                //println!("extracting values");
                 self.model = Some(self.graph.all_values());
             }
         }
+
+        //println!("check done.");
     }
 
     fn explain(&mut self, _l: Lit, _x: u32, _buf: &mut Refinement) {
@@ -287,10 +293,10 @@ impl Theory for SchedulingTheory {
 
                 let backtrack_size = ((self.trail.len() - self.trail_lim[level as usize]) as f32)
                     / (self.trail_lim.len() as f32);
-                println!(
-                    "Backtracking over {}% of the trail.",
-                    (backtrack_size * 100.0) as usize
-                );
+                //println!(
+                //    "Backtracking over {}% of the trail.",
+                //    (backtrack_size * 100.0) as usize
+                //);
             }
 
             let sums = &mut self.sum_watcher;
@@ -371,7 +377,9 @@ impl SchedulingSolver {
         a: &[Lit],
     ) -> Result<Model<'a>, Box<dyn Iterator<Item = Lit> + 'a>> {
         self.prop.set_assumptions(a.iter().cloned());
+        //println!("start sat...");
         self.was_sat = self.prop.solve() == LBOOL_TRUE;
+        //println!("sat done");
         if self.was_sat {
             Ok(Model { solver: self })
         } else {
@@ -450,8 +458,10 @@ impl SchedulingSolver {
                 .iter()
                 .map(|s| s.lit)
                 .collect::<Vec<Lit>>();
-            println!("solving with assumptions {:?}", assumptions);
+            //println!("solving with assumptions {:?}", assumptions);
+            //println!("solving with assumptions...");
             let mut result = self.solve_with_assumptions(&assumptions);
+            //println!("solver finished");
             match result {
                 Ok(_) => {
                     drop(result);
@@ -463,7 +473,7 @@ impl SchedulingSolver {
                     let core = core.collect::<Vec<_>>();
                     drop(result);
 
-                    println!("got core {} {:?}", core.len(), core);
+                    //println!("got core {} {:?}", core.len(), core);
                     if core.len() == 0 {
                         return Err(());
                     }
