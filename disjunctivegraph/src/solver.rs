@@ -447,6 +447,9 @@ impl SchedulingSolver {
 
         let mut cost: i32 = 0;
 
+                    println!(" before optimization, sum constraints are:");
+                    println!(" {:?}", self.prop.theory.sum_watcher.sum_constraints);
+
         loop {
             // Assume all the sum constraints.
             // TODO don't copy the assumption lits, somehow.
@@ -473,7 +476,7 @@ impl SchedulingSolver {
                     let core = core.collect::<Vec<_>>();
                     drop(result);
 
-                    //println!("got core {} {:?}", core.len(), core);
+                    println!("got core {} {:?}", core.len(), core);
                     if core.len() == 0 {
                         return Err(());
                     }
@@ -527,6 +530,9 @@ impl SchedulingSolver {
                             self.add_constraint_coeff(new_sum, IntVar(nd), c);
                         }
                     }
+
+                    println!(" after treating the core, sum constraints are:");
+                    println!(" {:?}", self.prop.theory.sum_watcher.sum_constraints);
                 }
             }
         }
