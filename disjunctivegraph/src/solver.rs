@@ -501,6 +501,7 @@ impl SchedulingSolver {
                         // increase the bound and find a new lit.
                         //self.delete_sum_constraint(sumref);
                         sum.lit = new_lit;
+                        sum.min_violation = u32::MAX;
                         sum_bound += sum.bound;
                         self.prop.theory.sum_by_lit.remove(lit);
                         self.prop.theory.sum_by_lit.insert(new_lit, sumref);
