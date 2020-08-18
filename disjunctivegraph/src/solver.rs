@@ -31,6 +31,7 @@ struct Sum {
     current_value: i32,
     min_violation: u32,
     nodes: SmallVec<[(Node, i32); 4]>,
+    optimize: bool,
 }
 
 struct SumWatcher {
@@ -200,7 +201,7 @@ impl Theory for SchedulingTheory {
 
             //println!("iter critical set...");
             let clause = clause.collect::<Vec<_>>();
-            //println!("SUMWATCHER Adding clause {:?}", clause);
+            println!("SUMWATCHER (1) Adding clause {:?}", clause);
             //println!("iter critical set done");
 
             buf.add_clause(clause);
@@ -223,7 +224,8 @@ impl Theory for SchedulingTheory {
                     .enable_edge_cb(*edge, |nd, a, b| sums.notify(nd, a, b))
                 {
                     let map = &self.edge_condition;
-                    let cycle = cycle.filter_map(|edge| map.get(&edge)).map(|lit| !*lit);
+                    let cycle = cycle.filter_map(|edge| map.get(&edge)).map(|lit| !*lit).collect::<Vec<_>>();
+                    println!("SCHEDULE constraint {:?}", cycle);
 
                     buf.add_clause(cycle);
 
@@ -247,7 +249,7 @@ impl Theory for SchedulingTheory {
                     let clause = std::iter::once(!sum.lit).chain(reason);
 
                     let clause = clause.collect::<Vec<_>>();
-                    //println!("SUMWATCHER Adding clause {:?}", clause);
+                    println!("SUMWATCHER (2) Adding clause {:?}", clause);
 
                     buf.add_clause(clause);
 
@@ -418,9 +420,16 @@ impl SchedulingSolver {
             bound,
             current_value: 0,
             min_violation: u32::MAX,
+            optimize: true,
         });
         self.prop.theory.sum_by_lit.insert(lit, sumref);
         sumref
+    }
+
+    pub fn set_conditional_upper_bound(&mut self, lit :Lit, var: IntVar, value :u32) {
+        let sumref = self.new_sum_constraint(lit, value);
+        self.prop.theory.sum_watcher.sum_constraints[sumref.0 as usize].optimize = false;
+        self.add_constraint_coeff(sumref, var, 1);
     }
 
     pub fn add_constraint_coeff(&mut self, sumref: SumRef, IntVar(node): IntVar, coeff: i32) {
@@ -445,10 +454,11 @@ impl SchedulingSolver {
         // RC2-like algorithm, except that the constraints are not relaxable,
         // and they are implemented as a theory using diff constraints scheduling/longest paths.
 
+        println!("start optimize.");
         let mut cost: i32 = 0;
 
-                    println!(" before optimization, sum constraints are:");
-                    println!(" {:?}", self.prop.theory.sum_watcher.sum_constraints);
+                    //println!(" before optimization, sum constraints are:");
+                    //println!(" {:?}", self.prop.theory.sum_watcher.sum_constraints);
 
         loop {
             // Assume all the sum constraints.
@@ -459,6 +469,7 @@ impl SchedulingSolver {
                 .sum_watcher
                 .sum_constraints
                 .iter()
+                .filter(|s| s.optimize)
                 .map(|s| s.lit)
                 .collect::<Vec<Lit>>();
             //println!("solving with assumptions {:?}", assumptions);
@@ -531,8 +542,8 @@ impl SchedulingSolver {
                         }
                     }
 
-                    println!(" after treating the core, sum constraints are:");
-                    println!(" {:?}", self.prop.theory.sum_watcher.sum_constraints);
+                    //println!(" after treating the core, sum constraints are:");
+                    //println!(" {:?}", self.prop.theory.sum_watcher.sum_constraints);
                 }
             }
         }

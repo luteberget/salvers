@@ -87,11 +87,4 @@ fn trains(t_d :i32) {
     println!("Train A:  {} (a) {}  --  {} (b) {}  --  {} (c)", tr_a_enter, tr_a_leave_A, tr_a_enter_B, tr_a_leave_B, tr_a_enter_C);
     println!("Train B:  {} (c) {}  --  {} (b)", tr_b_enter, tr_b_leave_C, tr_b_enter_B);
 
-
-    //println!(
-    //    "x={} y={} z={}",
-    //    model.get_int_value(x),
-    //    model.get_int_value(y),
-    //    model.get_int_value(z)
-    //);
 }
