@@ -3,6 +3,7 @@ use std::collections::HashMap;
 /// A binary **min** heap of i32 keys. Each method that modifies the heap takes a function
 /// parameter for assigning a value to each key for comparison. This function should
 /// be consistent over calls to ensure correct heap properties.
+#[derive(Debug)]
 pub struct OrderHeap {
     heap: Vec<i32>,             // Heap of variables
     indices: HashMap<i32, i32>, // Map of variables to index in heap

@@ -15,3 +15,6 @@ hprof = "0.1"
 [dev-dependencies]
 itertools = "0.9"
 rc2 = { path = "../rc2" }
+quickcheck = "0.9"
+rand = "0.7"
+
