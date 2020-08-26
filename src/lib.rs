@@ -1891,6 +1891,7 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     fn simplify(&mut self) -> bool {
+        let _p = hprof::enter("sat simplify");
         assert!(self.trail_lim.len() == 0);
         debug!(
             "simplify called at decisionlevel=0 with trail length={}",
@@ -2154,6 +2155,7 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     fn search(&mut self, nof_conflicts: i32) -> LBool {
+        let _p = hprof::enter("sat search");
         debug!("-> SEARCH(nof_conflicts={})", nof_conflicts);
         assert!(self.ok);
         let mut conflict_c = 0;
@@ -2192,6 +2194,9 @@ impl<Th: Theory> DplltSolver<Th> {
 
                     }
                 }
+
+                {
+        let _p = hprof::enter("sat backtrack");
 
                 self.cancel_until(backtrack_level);
                 if learnt_clause.len() == 1 {
@@ -2232,7 +2237,9 @@ impl<Th: Theory> DplltSolver<Th> {
                         (self.stats.learnts_literals as f64 / self.learnts.len() as f64) as isize
                     );
                 }
+                }
             } else {
+                let _p = hprof::enter("sat decide");
 
             //println!("search loop iter: no conflict");
                 // no conflict found
@@ -2259,6 +2266,7 @@ impl<Th: Theory> DplltSolver<Th> {
                 trace!("max learnts: {}", self.max_learnts);
                 if self.learnts.len() as f64 - self.trail.len() as f64 >= self.max_learnts {
                     trace!("reduce_db");
+                    let _p = hprof::enter("sat reduce db");
                     self.reduce_db();
                 }
 
@@ -2334,6 +2342,7 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     pub fn solve(&mut self) -> LBool {
+        let _p = hprof::enter("sat solve");
         debug!("-> SOLVE");
         self.model.clear();
         self.conflict.clear();
@@ -2372,7 +2381,7 @@ impl<Th: Theory> DplltSolver<Th> {
         }
 
         if self.verbosity >= 1 {
-            info!("* solve finished");
+            info!("* solve finished (vars={}, clauses={}, learnts={})", self.num_vars(), self.num_clauses(), self.num_learnts());
         }
 
         if status == LBOOL_TRUE {

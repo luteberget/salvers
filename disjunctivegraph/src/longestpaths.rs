@@ -1,3 +1,4 @@
+use log::*;
 use crate::orderheap::*;
 use smallvec::*;
 
@@ -149,7 +150,7 @@ impl LongestPaths {
             return Ok(());
         }
 
-        println!("enable_edge: nontrivial {:?}", add_idx);
+        trace!("enable_edge: nontrivial {:?}", add_idx);
         self.current_updates.clear();
         debug_assert!(self.queue.is_empty());
         {
@@ -168,7 +169,7 @@ impl LongestPaths {
                 .remove_min(|i| values[edges[*i as usize].target as usize])
         } {
             let edge = &self.edge_data[edge_idx as usize];
-            println!("Enabling edge {} {:?}", edge_idx, edge);
+            trace!("Enabling edge {} {:?}", edge_idx, edge);
             let target_updated = self.values[edge.source as usize] + edge.distance
                 > self.values[edge.target as usize];
 
@@ -234,7 +235,7 @@ impl LongestPaths {
         //panic!();
         debug_assert!(self.queue.is_empty());
         let edges = edges.into_iter().collect::<Vec<_>>();
-        println!("disable edges {:?}", edges);
+        trace!("disable edges {:?}", edges);
 
         // Add the edges-to-be-disabled to the heap.
         let mut i = 0;

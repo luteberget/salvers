@@ -1,3 +1,4 @@
+use log::*;
 use crate::longestpaths::*;
 pub use mysatsolver::Lit;
 use mysatsolver::*;
@@ -125,6 +126,10 @@ struct SchedulingTheory {
 
     trail: Vec<Edge>,
     trail_lim: Vec<usize>,
+
+    // perf counters
+    num_sumwatcher_clauses :usize,
+    num_cycle_clauses :usize,
 }
 
 impl SchedulingTheory {
@@ -141,6 +146,8 @@ impl SchedulingTheory {
             graph: LongestPaths::new(),
             trail: Vec::new(),
             trail_lim: Vec::new(),
+            num_sumwatcher_clauses: 0,
+            num_cycle_clauses: 0,
         }
     }
 
@@ -180,6 +187,7 @@ impl SchedulingTheory {
 
 impl Theory for SchedulingTheory {
     fn check(&mut self, ch: Check, lits: &[Lit], buf: &mut Refinement) {
+        let _p = hprof::enter("theory check");
         //println!("Check {:?} {:?}", ch, lits);
         #[cfg(debug_assertions)]
         assert!(!self.requires_backtrack);
@@ -189,6 +197,9 @@ impl Theory for SchedulingTheory {
             self.model = None;
         }
 
+
+        {
+            let _p = hprof::enter("theory sumrefcheck1");
         for sumref in self.sum_watcher.violations.drain(..) {
             //println!("sumref {:?}", sumref);
             let sum = &self.sum_watcher.sum_constraints[sumref.idx()];
@@ -201,7 +212,8 @@ impl Theory for SchedulingTheory {
 
             //println!("iter critical set...");
             let clause = clause.collect::<Vec<_>>();
-            println!("SUMWATCHER (1) Adding clause {:?}", clause);
+            self.num_sumwatcher_clauses += 1;
+            //debug!("SUMWATCHER (1) Adding clause {:?}", clause);
             //println!("iter critical set done");
 
             buf.add_clause(clause);
@@ -215,17 +227,26 @@ impl Theory for SchedulingTheory {
             //return;
         }
             //println!("sumref done.");
+        }
 
         for lit in lits {
-            if let Some(edge) = self.condition_edge.get(lit) {
+            if let Some(edge) = {
+                let _p = hprof::enter("theory condition_edge.get(lit)");
+                self.condition_edge.get(lit)
+            }{
                 let sums = &mut self.sum_watcher;
-                if let Err(cycle) = self
-                    .graph
-                    .enable_edge_cb(*edge, |nd, a, b| sums.notify(nd, a, b))
-                {
+
+
+                if let Err(cycle) =  {
+                let _p = hprof::enter("theory enable_edge");
+
+                self .graph .enable_edge_cb(*edge, |nd, a, b| sums.notify(nd, a, b))
+                } {
+                    let _p = hprof::enter("theory cycle");
                     let map = &self.edge_condition;
                     let cycle = cycle.filter_map(|edge| map.get(&edge)).map(|lit| !*lit).collect::<Vec<_>>();
-                    println!("SCHEDULE constraint {:?}", cycle);
+                    //debug!("SCHEDULING cycle constraint {:?}", cycle);
+                    self.num_cycle_clauses += 1;
 
                     buf.add_clause(cycle);
 
@@ -239,6 +260,8 @@ impl Theory for SchedulingTheory {
                     self.trail.push(*edge);
                 }
 
+                {
+                    let _p = hprof::enter("theory sumcheck2");
                 for sumref in self.sum_watcher.violations.drain(..) {
                     let sum = &self.sum_watcher.sum_constraints[sumref.idx()];
                     let critical_set = self.graph.critical_set(sum.nodes.iter().map(|(n, _)| *n));
@@ -249,7 +272,8 @@ impl Theory for SchedulingTheory {
                     let clause = std::iter::once(!sum.lit).chain(reason);
 
                     let clause = clause.collect::<Vec<_>>();
-                    println!("SUMWATCHER (2) Adding clause {:?}", clause);
+                    //debug!("SUMWATCHER (2) Adding clause {:?}", clause);
+                    self.num_sumwatcher_clauses += 1;
 
                     buf.add_clause(clause);
 
@@ -261,6 +285,7 @@ impl Theory for SchedulingTheory {
 
                     //return;
                 }
+                }
             } else {
                 //println!("irrelevant lit {:?}", lit);
             }
@@ -270,6 +295,7 @@ impl Theory for SchedulingTheory {
             // If we get here, the problem is SAT, so we preserve the model before backtracking.
             //println!("Theory: FINAL SAT");
             if !self.model.is_some() {
+            let _p = hprof::enter("theory extractmodel");
                 //println!("extracting values");
                 self.model = Some(self.graph.all_values());
             }
@@ -283,10 +309,12 @@ impl Theory for SchedulingTheory {
     }
 
     fn new_decision_level(&mut self) {
+        let _p = hprof::enter("theory trail_lim");
         self.trail_lim.push(self.trail.len());
     }
 
     fn backtrack(&mut self, level: i32) {
+        let _p = hprof::enter("theory backtrack");
         self.invalidate_model = true;
         if (level as usize) < self.trail_lim.len() {
             #[cfg(debug_assertions)]
@@ -317,6 +345,8 @@ impl Theory for SchedulingTheory {
 pub struct SchedulingSolver {
     prop: DplltSolver<SchedulingTheory>,
     was_sat: bool,
+    num_cores :usize,
+    num_sum_constraints: usize,
 }
 
 impl SchedulingSolver {
@@ -325,6 +355,8 @@ impl SchedulingSolver {
         SchedulingSolver {
             prop: DplltSolver::new(SchedulingTheory::new()),
             was_sat: false,
+            num_cores: 0,
+            num_sum_constraints: 0,
         }
     }
 
@@ -412,6 +444,8 @@ impl SchedulingSolver {
     }
 
     pub fn new_sum_constraint(&mut self, lit: Lit, bound: u32) -> SumRef {
+        debug!("new sum constraint {:?} < {}", lit, bound);
+        self.num_sum_constraints += 1;
         assert!(self.prop.theory.trail_lim.len() == 0);
         let sumref = SumRef(self.prop.theory.sum_watcher.sum_constraints.len() as u32);
         self.prop.theory.sum_watcher.sum_constraints.push(Sum {
@@ -454,13 +488,15 @@ impl SchedulingSolver {
         // RC2-like algorithm, except that the constraints are not relaxable,
         // and they are implemented as a theory using diff constraints scheduling/longest paths.
 
-        println!("start optimize.");
+        debug!("start optimize.");
         let mut cost: i32 = 0;
 
                     //println!(" before optimization, sum constraints are:");
                     //println!(" {:?}", self.prop.theory.sum_watcher.sum_constraints);
 
         loop {
+            let mut result = {
+        let _p = hprof::enter("optimize solve");
             // Assume all the sum constraints.
             // TODO don't copy the assumption lits, somehow.
             let assumptions = self
@@ -475,6 +511,8 @@ impl SchedulingSolver {
             //println!("solving with assumptions {:?}", assumptions);
             //println!("solving with assumptions...");
             let mut result = self.solve_with_assumptions(&assumptions);
+            result
+            };
             //println!("solver finished");
             match result {
                 Ok(_) => {
@@ -483,11 +521,13 @@ impl SchedulingSolver {
                     return Ok((cost, model));
                 }
                 Err(ref mut core) => {
+        let _p = hprof::enter("optimize treat core");
                     // Some of them are not satisifable
                     let core = core.collect::<Vec<_>>();
                     drop(result);
 
-                    println!("got core {} {:?}", core.len(), core);
+                    self.num_cores += 1;
+                    debug!("got core {} {:?}", core.len(), core);
                     if core.len() == 0 {
                         return Err(());
                     }
@@ -531,7 +571,11 @@ impl SchedulingSolver {
                     }
 
                     cost += min_weight as i32;
-                    println!("increased cost by {} to {}", min_weight, cost);
+                    debug!("increased cost by {} to {}", min_weight, cost);
+                    debug!("#cores={}, #sums={}, #sumlearn={}, #cyclelearn={}",
+                           self.num_cores, self.num_sum_constraints,
+                           self.prop.theory.num_sumwatcher_clauses,
+                           self.prop.theory.num_cycle_clauses);
                     debug_assert!(min_weight < u32::MAX);
 
                     if core.len() > 1 {
