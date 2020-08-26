@@ -2,10 +2,13 @@ use disjunctivegraph;
 
 #[test]
 fn trains_test() {
-    for t_d in 87..93 { trains(t_d); println!("\n");}
+    for t_d in 87..93 {
+        trains(t_d);
+        println!("\n");
+    }
 }
 
-fn trains(t_d :i32) {
+fn trains(t_d: i32) {
     let mut s = disjunctivegraph::SchedulingSolver::new();
 
     // first train arrives/leaves station A at t=0, arrives at B (at least) 60 sec later,
@@ -48,11 +51,10 @@ fn trains(t_d :i32) {
     s.add_diff(Some(a_first), tr_a_enter_C, tr_b_leave_C, 1); // set one second to avoid zero-length-edge problems.
     s.add_diff(Some(b_first), tr_b_enter_B, tr_a_leave_B, 1);
 
-
     // minmize the delays
     let mut delay_cost_after = |timevar, expected| {
         let sum = s.new_bool();
-        println!("bool={:?} int={:?} expected={}", sum, timevar, expected );
+        println!("bool={:?} int={:?} expected={}", sum, timevar, expected);
         let sum1 = s.new_sum_constraint(sum, expected);
         s.add_constraint_coeff(sum1, timevar, 1);
     };
@@ -60,9 +62,9 @@ fn trains(t_d :i32) {
     print!("delay cost for t_a_enter_B ");
     delay_cost_after(tr_a_enter_B, 60);
     print!("delay cost for t_a_enter_C ");
-    delay_cost_after(tr_a_enter_C, 60+30+60);
+    delay_cost_after(tr_a_enter_C, 60 + 30 + 60);
     print!("delay cost for t_b_enter_B ");
-    delay_cost_after(tr_b_enter_B, t_d as u32 +60);
+    delay_cost_after(tr_b_enter_B, t_d as u32 + 60);
 
     let (cost, model) = s.optimize().unwrap();
     println!(" ** DONE ");
@@ -72,19 +74,28 @@ fn trains(t_d :i32) {
     let a_first = model.get_bool_value(a_first);
     let b_first = model.get_bool_value(b_first);
     assert!((a_first && !b_first) || (b_first && !a_first));
-    if a_first { println!("Train A goes first"); } else { println!("Train B goes first"); }
+    if a_first {
+        println!("Train A goes first");
+    } else {
+        println!("Train B goes first");
+    }
 
-    let tr_a_enter   = model.get_int_value(tr_a_enter  );
+    let tr_a_enter = model.get_int_value(tr_a_enter);
     let tr_a_leave_A = model.get_int_value(tr_a_leave_A);
     let tr_a_enter_B = model.get_int_value(tr_a_enter_B);
     let tr_a_leave_B = model.get_int_value(tr_a_leave_B);
     let tr_a_enter_C = model.get_int_value(tr_a_enter_C);
-                                                       
-    let tr_b_enter   = model.get_int_value(tr_b_enter  );
+
+    let tr_b_enter = model.get_int_value(tr_b_enter);
     let tr_b_leave_C = model.get_int_value(tr_b_leave_C);
     let tr_b_enter_B = model.get_int_value(tr_b_enter_B);
 
-    println!("Train A:  {} (a) {}  --  {} (b) {}  --  {} (c)", tr_a_enter, tr_a_leave_A, tr_a_enter_B, tr_a_leave_B, tr_a_enter_C);
-    println!("Train B:  {} (c) {}  --  {} (b)", tr_b_enter, tr_b_leave_C, tr_b_enter_B);
-
+    println!(
+        "Train A:  {} (a) {}  --  {} (b) {}  --  {} (c)",
+        tr_a_enter, tr_a_leave_A, tr_a_enter_B, tr_a_leave_B, tr_a_enter_C
+    );
+    println!(
+        "Train B:  {} (c) {}  --  {} (b)",
+        tr_b_enter, tr_b_leave_C, tr_b_enter_B
+    );
 }

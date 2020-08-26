@@ -1,5 +1,5 @@
-use log::*;
 use crate::orderheap::*;
+use log::*;
 use smallvec::*;
 
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -188,8 +188,11 @@ impl LongestPaths {
                 }
 
                 updated_root = true;
-                self.current_updates
-                    .push((edge.target, self.values[edge.target as usize], self.node_updated_from[edge.target as usize]));
+                self.current_updates.push((
+                    edge.target,
+                    self.values[edge.target as usize],
+                    self.node_updated_from[edge.target as usize],
+                ));
                 let old_value = self.values[edge.target as usize];
                 let new_value = self.values[edge.source as usize] + edge.distance;
                 self.values[edge.target as usize] = new_value;
@@ -363,7 +366,7 @@ pub struct CycleIterator<'a> {
     graph: &'a mut LongestPaths,
     start_node: Node,
     node: Option<Node>,
-    add_idx :u32,
+    add_idx: u32,
 }
 
 impl<'a> Drop for CycleIterator<'a> {
@@ -389,7 +392,7 @@ impl<'a> Iterator for CycleIterator<'a> {
 
     fn next(&mut self) -> Option<Edge> {
         if let Some(node) = self.node {
-            let edge_idx = self.graph.node_updated_from[node.0 as usize]; 
+            let edge_idx = self.graph.node_updated_from[node.0 as usize];
             assert!(edge_idx != -1);
             let edge = &self.graph.edge_data[edge_idx as usize];
             //debug_assert!(edge.source > 0);
@@ -468,28 +471,40 @@ mod tests {
     #[test]
     fn randedges() {
         use rand;
-        use rand::Rng;
         use rand::seq::SliceRandom;
+        use rand::Rng;
         let mut rng = rand::thread_rng();
-        let edges = (0..100).map(|_i| (rng.gen_range(0,10), rng.gen_range(0,10), rng.gen_range(0,10))).collect::<Vec<(u32,u32,u32)>>();
+        let edges = (0..100)
+            .map(|_i| {
+                (
+                    rng.gen_range(0, 10),
+                    rng.gen_range(0, 10),
+                    rng.gen_range(0, 10),
+                )
+            })
+            .collect::<Vec<(u32, u32, u32)>>();
         println!("EDGES {:?}", edges);
         let mut lp = LongestPaths::new();
         let mut nodes = Vec::new();
         let mut lpedges = Vec::new();
-        for (a,b,d) in edges.iter() {
-            while nodes.len() <= (*a as usize) || nodes.len() <= (*b as usize) { nodes.push(lp.new_node()); }
-            lpedges.push(lp.new_edge(nodes[*a as usize],nodes[*b as usize],*d as i32));
+        for (a, b, d) in edges.iter() {
+            while nodes.len() <= (*a as usize) || nodes.len() <= (*b as usize) {
+                nodes.push(lp.new_node());
+            }
+            lpedges.push(lp.new_edge(nodes[*a as usize], nodes[*b as usize], *d as i32));
         }
         for _i in 0..(edges.len()) {
             let n = rng.gen_range(0, edges.len());
-            if rng.gen_range(0,2) == 0 {
+            if rng.gen_range(0, 2) == 0 {
                 for _j in 0..n {
                     let e = *lpedges.choose(&mut rng).unwrap();
                     println!("enabling {:?}", e);
                     lp.enable_edge(e);
                 }
             } else {
-                let d = (0..n).map(|i| *lpedges.choose(&mut rng).unwrap()).collect::<Vec<_>>();
+                let d = (0..n)
+                    .map(|i| *lpedges.choose(&mut rng).unwrap())
+                    .collect::<Vec<_>>();
                 println!("Disabling {:?}", d);
                 lp.disable_edges(d);
             }

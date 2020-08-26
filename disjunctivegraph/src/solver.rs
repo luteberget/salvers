@@ -1,5 +1,5 @@
-use log::*;
 use crate::longestpaths::*;
+use log::*;
 pub use mysatsolver::Lit;
 use mysatsolver::*;
 use smallvec::SmallVec;
@@ -105,9 +105,9 @@ impl SumWatcher {
         }
     }
 
-//    fn get_violations(&self) -> &[SumRef] {
-//        &self.violations
-//    }
+    //    fn get_violations(&self) -> &[SumRef] {
+    //        &self.violations
+    //    }
 }
 
 struct SchedulingTheory {
@@ -128,8 +128,8 @@ struct SchedulingTheory {
     trail_lim: Vec<usize>,
 
     // perf counters
-    num_sumwatcher_clauses :usize,
-    num_cycle_clauses :usize,
+    num_sumwatcher_clauses: usize,
+    num_cycle_clauses: usize,
 }
 
 impl SchedulingTheory {
@@ -197,35 +197,34 @@ impl Theory for SchedulingTheory {
             self.model = None;
         }
 
-
         {
             let _p = hprof::enter("theory sumrefcheck1");
-        for sumref in self.sum_watcher.violations.drain(..) {
-            //println!("sumref {:?}", sumref);
-            let sum = &self.sum_watcher.sum_constraints[sumref.idx()];
-            let critical_set = self.graph.critical_set(sum.nodes.iter().map(|(n, _)| *n));
-            let map = &self.edge_condition;
-            let reason = critical_set
-                .filter_map(|edge| map.get(&edge))
-                .map(|lit| !*lit);
-            let clause = std::iter::once(!sum.lit).chain(reason);
+            for sumref in self.sum_watcher.violations.drain(..) {
+                //println!("sumref {:?}", sumref);
+                let sum = &self.sum_watcher.sum_constraints[sumref.idx()];
+                let critical_set = self.graph.critical_set(sum.nodes.iter().map(|(n, _)| *n));
+                let map = &self.edge_condition;
+                let reason = critical_set
+                    .filter_map(|edge| map.get(&edge))
+                    .map(|lit| !*lit);
+                let clause = std::iter::once(!sum.lit).chain(reason);
 
-            //println!("iter critical set...");
-            let clause = clause.collect::<Vec<_>>();
-            self.num_sumwatcher_clauses += 1;
-            //debug!("SUMWATCHER (1) Adding clause {:?}", clause);
-            //println!("iter critical set done");
+                //println!("iter critical set...");
+                let clause = clause.collect::<Vec<_>>();
+                self.num_sumwatcher_clauses += 1;
+                //debug!("SUMWATCHER (1) Adding clause {:?}", clause);
+                //println!("iter critical set done");
 
-            buf.add_clause(clause);
+                buf.add_clause(clause);
 
-            //// Doesn't necessarily require backtrack... (?)
-            //#[cfg(debug_assertions)]
-            //{
-            //    self.requires_backtrack = true;
-            //}
+                //// Doesn't necessarily require backtrack... (?)
+                //#[cfg(debug_assertions)]
+                //{
+                //    self.requires_backtrack = true;
+                //}
 
-            //return;
-        }
+                //return;
+            }
             //println!("sumref done.");
         }
 
@@ -233,18 +232,21 @@ impl Theory for SchedulingTheory {
             if let Some(edge) = {
                 let _p = hprof::enter("theory condition_edge.get(lit)");
                 self.condition_edge.get(lit)
-            }{
+            } {
                 let sums = &mut self.sum_watcher;
 
+                if let Err(cycle) = {
+                    let _p = hprof::enter("theory enable_edge");
 
-                if let Err(cycle) =  {
-                let _p = hprof::enter("theory enable_edge");
-
-                self .graph .enable_edge_cb(*edge, |nd, a, b| sums.notify(nd, a, b))
+                    self.graph
+                        .enable_edge_cb(*edge, |nd, a, b| sums.notify(nd, a, b))
                 } {
                     let _p = hprof::enter("theory cycle");
                     let map = &self.edge_condition;
-                    let cycle = cycle.filter_map(|edge| map.get(&edge)).map(|lit| !*lit).collect::<Vec<_>>();
+                    let cycle = cycle
+                        .filter_map(|edge| map.get(&edge))
+                        .map(|lit| !*lit)
+                        .collect::<Vec<_>>();
                     //debug!("SCHEDULING cycle constraint {:?}", cycle);
                     self.num_cycle_clauses += 1;
 
@@ -262,29 +264,30 @@ impl Theory for SchedulingTheory {
 
                 {
                     let _p = hprof::enter("theory sumcheck2");
-                for sumref in self.sum_watcher.violations.drain(..) {
-                    let sum = &self.sum_watcher.sum_constraints[sumref.idx()];
-                    let critical_set = self.graph.critical_set(sum.nodes.iter().map(|(n, _)| *n));
-                    let map = &self.edge_condition;
-                    let reason = critical_set
-                        .filter_map(|edge| map.get(&edge))
-                        .map(|lit| !*lit);
-                    let clause = std::iter::once(!sum.lit).chain(reason);
+                    for sumref in self.sum_watcher.violations.drain(..) {
+                        let sum = &self.sum_watcher.sum_constraints[sumref.idx()];
+                        let critical_set =
+                            self.graph.critical_set(sum.nodes.iter().map(|(n, _)| *n));
+                        let map = &self.edge_condition;
+                        let reason = critical_set
+                            .filter_map(|edge| map.get(&edge))
+                            .map(|lit| !*lit);
+                        let clause = std::iter::once(!sum.lit).chain(reason);
 
-                    let clause = clause.collect::<Vec<_>>();
-                    //debug!("SUMWATCHER (2) Adding clause {:?}", clause);
-                    self.num_sumwatcher_clauses += 1;
+                        let clause = clause.collect::<Vec<_>>();
+                        //debug!("SUMWATCHER (2) Adding clause {:?}", clause);
+                        self.num_sumwatcher_clauses += 1;
 
-                    buf.add_clause(clause);
+                        buf.add_clause(clause);
 
-                    //// Doesn't necessarily require backtrack... (?)
-                    //#[cfg(debug_assertions)]
-                    //{
-                    //    self.requires_backtrack = true;
-                    //}
+                        //// Doesn't necessarily require backtrack... (?)
+                        //#[cfg(debug_assertions)]
+                        //{
+                        //    self.requires_backtrack = true;
+                        //}
 
-                    //return;
-                }
+                        //return;
+                    }
                 }
             } else {
                 //println!("irrelevant lit {:?}", lit);
@@ -295,7 +298,7 @@ impl Theory for SchedulingTheory {
             // If we get here, the problem is SAT, so we preserve the model before backtracking.
             //println!("Theory: FINAL SAT");
             if !self.model.is_some() {
-            let _p = hprof::enter("theory extractmodel");
+                let _p = hprof::enter("theory extractmodel");
                 //println!("extracting values");
                 self.model = Some(self.graph.all_values());
             }
@@ -345,7 +348,7 @@ impl Theory for SchedulingTheory {
 pub struct SchedulingSolver {
     prop: DplltSolver<SchedulingTheory>,
     was_sat: bool,
-    num_cores :usize,
+    num_cores: usize,
     num_sum_constraints: usize,
 }
 
@@ -460,7 +463,7 @@ impl SchedulingSolver {
         sumref
     }
 
-    pub fn set_conditional_upper_bound(&mut self, lit :Lit, var: IntVar, value :u32) {
+    pub fn set_conditional_upper_bound(&mut self, lit: Lit, var: IntVar, value: u32) {
         let sumref = self.new_sum_constraint(lit, value);
         self.prop.theory.sum_watcher.sum_constraints[sumref.0 as usize].optimize = false;
         self.add_constraint_coeff(sumref, var, 1);
@@ -491,27 +494,27 @@ impl SchedulingSolver {
         debug!("start optimize.");
         let mut cost: i32 = 0;
 
-                    //println!(" before optimization, sum constraints are:");
-                    //println!(" {:?}", self.prop.theory.sum_watcher.sum_constraints);
+        //println!(" before optimization, sum constraints are:");
+        //println!(" {:?}", self.prop.theory.sum_watcher.sum_constraints);
 
         loop {
             let mut result = {
-        let _p = hprof::enter("optimize solve");
-            // Assume all the sum constraints.
-            // TODO don't copy the assumption lits, somehow.
-            let assumptions = self
-                .prop
-                .theory
-                .sum_watcher
-                .sum_constraints
-                .iter()
-                .filter(|s| s.optimize)
-                .map(|s| s.lit)
-                .collect::<Vec<Lit>>();
-            //println!("solving with assumptions {:?}", assumptions);
-            //println!("solving with assumptions...");
-            let mut result = self.solve_with_assumptions(&assumptions);
-            result
+                let _p = hprof::enter("optimize solve");
+                // Assume all the sum constraints.
+                // TODO don't copy the assumption lits, somehow.
+                let assumptions = self
+                    .prop
+                    .theory
+                    .sum_watcher
+                    .sum_constraints
+                    .iter()
+                    .filter(|s| s.optimize)
+                    .map(|s| s.lit)
+                    .collect::<Vec<Lit>>();
+                //println!("solving with assumptions {:?}", assumptions);
+                //println!("solving with assumptions...");
+                let mut result = self.solve_with_assumptions(&assumptions);
+                result
             };
             //println!("solver finished");
             match result {
@@ -521,7 +524,7 @@ impl SchedulingSolver {
                     return Ok((cost, model));
                 }
                 Err(ref mut core) => {
-        let _p = hprof::enter("optimize treat core");
+                    let _p = hprof::enter("optimize treat core");
                     // Some of them are not satisifable
                     let core = core.collect::<Vec<_>>();
                     drop(result);
@@ -572,10 +575,13 @@ impl SchedulingSolver {
 
                     cost += min_weight as i32;
                     debug!("increased cost by {} to {}", min_weight, cost);
-                    debug!("#cores={}, #sums={}, #sumlearn={}, #cyclelearn={}",
-                           self.num_cores, self.num_sum_constraints,
-                           self.prop.theory.num_sumwatcher_clauses,
-                           self.prop.theory.num_cycle_clauses);
+                    debug!(
+                        "#cores={}, #sums={}, #sumlearn={}, #cyclelearn={}",
+                        self.num_cores,
+                        self.num_sum_constraints,
+                        self.prop.theory.num_sumwatcher_clauses,
+                        self.prop.theory.num_cycle_clauses
+                    );
                     debug_assert!(min_weight < u32::MAX);
 
                     if core.len() > 1 {
