@@ -17,24 +17,31 @@ pub enum Check {
 pub struct Refinement {
     last_clause_idx: i32,
     data: Vec<i32>,
+    next_var :i32,
 }
 
 impl Refinement {
-    pub fn new() -> Self {
+    pub fn new(next_var :i32) -> Self {
         Refinement {
             last_clause_idx: -1,
             data: Vec::new(),
+		next_var
         }
     }
 
-    pub fn clear(&mut self) {
+    pub fn clear(&mut self, next_var :i32) {
         self.data.clear();
         self.last_clause_idx = -1;
+        self.next_var = next_var;
     }
 
     pub fn new_clause(&mut self) {
         self.last_clause_idx = self.data.len() as i32;
         self.data.push(0);
+    }
+
+    pub fn new_var(&mut self) -> Lit {
+        Lit::new(Var((self.next_var, self.next_var += 1).0), false)
     }
 
     pub fn add_deduced(&mut self, lit: Lit, rref: u32) {
@@ -814,7 +821,7 @@ impl<Th: Theory> DplltSolver<Th> {
             var_inc: 1.0,
             qhead: 0,
             theory_qhead: 0,
-            theory_refinement_buffer: Refinement::new(),
+            theory_refinement_buffer: Refinement::new(0),
             theory_final_checked: false,
             simp_db_assigns: -1,
             simp_db_props: 0,
@@ -1719,7 +1726,7 @@ impl<Th: Theory> DplltSolver<Th> {
         // theory reason references are coded as "reason = (-3 - theory_ref)"
         // recover as "theory_ref = -3 - reason"
         let rref = (CLAUSE_THEORY_REFERENCE - reason) as u32;
-        self.theory_refinement_buffer.clear();
+        self.theory_refinement_buffer.clear(self.next_var);
         self.theory
             .explain(lit, rref, &mut self.theory_refinement_buffer);
         //println!("  ** theory-explain {:?}", self.theory_refinement_buffer.get_item_mut(0));
@@ -1991,7 +1998,7 @@ impl<Th: Theory> DplltSolver<Th> {
             let new_lits = &self.trail[self.theory_qhead..self.trail.len()];
             //println!("propagating {:?}", new_lits);
             self.theory_qhead = self.trail.len();
-            self.theory_refinement_buffer.clear();
+            self.theory_refinement_buffer.clear(self.next_var);
             self.theory.check(check, new_lits, &mut self.theory_refinement_buffer);
             //println!("vars left before refinement: {}", self.order_heap.heap.len());
             let theory_conflict = self.theory_refinement();
@@ -2081,6 +2088,12 @@ impl<Th: Theory> DplltSolver<Th> {
                 if let RefinementItemMut::Clause(lits) =
                     self.theory_refinement_buffer.get_item_mut(i)
                 {
+	            for l in lits.iter() {
+                        while l.var().idx() as i32 >= self.next_var {
+                           self.new_var_default();
+                        }
+                    }
+
                     if lits.len() == 0 {
                         backtrack_level = 0;
                         conflict = CLAUSE_THEORY_UNDEF;
