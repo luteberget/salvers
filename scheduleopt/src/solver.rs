@@ -1,7 +1,7 @@
 use crate::longestpaths::*;
 use log::*;
-pub use mysatsolver::Lit;
-use mysatsolver::*;
+pub use dpllt::Lit;
+use dpllt::*;
 use smallvec::SmallVec;
 use std::collections::HashMap;
 

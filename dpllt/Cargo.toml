@@ -1,5 +1,5 @@
 [package]
-name = "mysatsolver"
+name = "dpllt"
 version = "0.1.0"
 authors = ["Bjørnar Luteberget <luteberget@gmail.com>"]
 edition = "2018"
@@ -12,11 +12,9 @@ dimacs = "0.2"
 log = { version = "0.4", features = ["release_max_level_debug"] }
 cpu-time = "1.0"
 simple_logger = "1.6"
-sattrait = { path = "sattrait" }
+sattrait = { path = "../sattrait" }
 hprof = "0.1"
 
-[profile.release]
-lto = true
 
 [features]
 default = ["trace"]

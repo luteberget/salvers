@@ -1,8 +1,8 @@
-use mysatsolver;
+use dpllt;
 
 #[test]
 fn basic_incremental_use() {
-    use mysatsolver::*;
+    use dpllt::*;
 
     let mut s = SatSolver::new();
     let x = s.prop.new_var(LBOOL_UNDEF, true);

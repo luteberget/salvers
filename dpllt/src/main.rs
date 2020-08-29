@@ -1,5 +1,5 @@
 use log::*;
-use mysatsolver::*;
+use dpllt::*;
 
 fn main() {
     simple_logger::init().unwrap();

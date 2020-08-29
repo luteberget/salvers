@@ -1,6 +1,6 @@
-use mysatsolver::*;
+use dpllt::*;
 use sattrait;
-pub use mysatsolver::Lit;
+pub use dpllt::Lit;
 use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -268,7 +268,7 @@ impl IdlSolver {
     }
 
     /// Get a fresh Boolean variable.
-    pub fn new_bool(&mut self) -> mysatsolver::Lit {
+    pub fn new_bool(&mut self) -> dpllt::Lit {
         self.prop.new_var_default()
     }
 

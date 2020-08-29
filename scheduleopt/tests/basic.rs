@@ -1,8 +1,8 @@
-use disjunctivegraph;
+use scheduleopt;
 
 #[test]
 fn consts() {
-    let mut s = disjunctivegraph::SchedulingSolver::new();
+    let mut s = scheduleopt::SchedulingSolver::new();
     let x = s.new_int();
     let y = s.new_int();
     let z = s.new_int();

@@ -1,4 +1,4 @@
-use disjunctivegraph;
+use scheduleopt;
 use itertools::Itertools;
 
 #[test]
@@ -25,7 +25,7 @@ pub fn jobshop1() {
     assert_eq!(jobshop(s3).unwrap(), 21);
 
     fn jobshop(job_times: Vec<Vec<u32>>) -> Option<u32> {
-        let mut s = disjunctivegraph::SchedulingSolver::new();
+        let mut s = scheduleopt::SchedulingSolver::new();
         // process 5 jobs, each first on machine 1, then on machine 2.
 
         let zero = s.new_int();

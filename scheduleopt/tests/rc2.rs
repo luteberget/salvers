@@ -1,11 +1,11 @@
 //! MaxSAT optimization and scheduling logic.
 
-use disjunctivegraph;
+use scheduleopt;
 use rc2;
 
 #[test]
 pub fn opt() {
-    let mut solver = disjunctivegraph::SchedulingSolver::new();
+    let mut solver = scheduleopt::SchedulingSolver::new();
     let a = solver.new_int();
     let b = solver.new_int();
 

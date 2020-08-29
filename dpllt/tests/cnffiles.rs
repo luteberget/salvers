@@ -1,4 +1,4 @@
-use mysatsolver;
+use dpllt;
 
 fn for_each_cnf_filename(mut f: impl FnMut(&str)) {
     use std::{fs, path};
@@ -13,7 +13,7 @@ fn for_each_cnf_filename(mut f: impl FnMut(&str)) {
     }
 }
 
-fn verify_model<T: mysatsolver::Theory>(solver: &mut mysatsolver::DplltSolver<T>) -> bool {
+fn verify_model<T: dpllt::Theory>(solver: &mut dpllt::DplltSolver<T>) -> bool {
     if solver.solve().as_bool().unwrap() {
         // check that each clause is satisfied
         let model = solver
@@ -46,7 +46,7 @@ fn verify_model<T: mysatsolver::Theory>(solver: &mut mysatsolver::DplltSolver<T>
 
 #[test]
 fn hidden_clause_propagated_using_theory() {
-    use mysatsolver::*;
+    use dpllt::*;
     use std::collections::HashSet;
     #[derive(Default)]
     struct HiddenClauseTheory {
@@ -213,7 +213,7 @@ fn hidden_clause_propagated_using_theory() {
                                 for l in c.lits() {
                                     let var = Var(l.var().to_u64() as i32 - 1);
                                     while solver.num_vars() <= var.0 as usize {
-                                        solver.new_var(mysatsolver::LBOOL_UNDEF, true);
+                                        solver.new_var(dpllt::LBOOL_UNDEF, true);
                                     }
                                 }
 
@@ -224,7 +224,7 @@ fn hidden_clause_propagated_using_theory() {
                                     )
                                 });
 
-                                let rnd = mysatsolver::drand(rnd_seed);
+                                let rnd = dpllt::drand(rnd_seed);
                                 let lits = lits.collect::<Vec<_>>();
                                 if rnd < hidden_ratio {
                                     // add to hidden clauses
@@ -335,7 +335,7 @@ fn hidden_clause_propagated_using_theory() {
 
 #[test]
 fn hidden_clauses_added_using_theory() {
-    use mysatsolver::*;
+    use dpllt::*;
     #[derive(Default)]
     struct HiddenClauseTheory {
         clauses: Vec<Vec<Lit>>,
@@ -345,7 +345,7 @@ fn hidden_clauses_added_using_theory() {
         eager_pruning: bool,
     }
 
-    impl mysatsolver::Theory for HiddenClauseTheory {
+    impl dpllt::Theory for HiddenClauseTheory {
         fn check(&mut self, check: Check, lits: &[Lit], r: &mut Refinement) {
             let print = self.print;
             self.trail.extend(lits);
@@ -408,7 +408,7 @@ fn hidden_clauses_added_using_theory() {
                             for l in c.lits() {
                                 let var = Var(l.var().to_u64() as i32 - 1);
                                 while solver.num_vars() <= var.0 as usize {
-                                    solver.new_var(mysatsolver::LBOOL_UNDEF, true);
+                                    solver.new_var(dpllt::LBOOL_UNDEF, true);
                                 }
                             }
 
@@ -419,7 +419,7 @@ fn hidden_clauses_added_using_theory() {
                                 )
                             });
 
-                            let rnd = mysatsolver::drand(rnd_seed);
+                            let rnd = dpllt::drand(rnd_seed);
                             let lits = lits.collect::<Vec<_>>();
                             if rnd < hidden_ratio {
                                 // add to hidden clauses
@@ -531,7 +531,7 @@ fn hidden_clauses_added_using_theory() {
 fn correct_results_on_cnf_file_tests() {
     let external_solver_path = std::path::PathBuf::from(env!("SATSOLVER"));
     for_each_cnf_filename(|filename| {
-        let mut solver = mysatsolver::solver_from_dimacs_filename(filename);
+        let mut solver = dpllt::solver_from_dimacs_filename(filename);
         let _is_sat = solver.prop.solve().as_bool().unwrap();
         println!("  solve finished.");
         assert!(verify_model(&mut solver.prop));
@@ -543,8 +543,8 @@ fn correct_results_on_cnf_file_tests() {
     });
 }
 
-fn verify_external_solver<T: mysatsolver::Theory>(
-    solver: &mut mysatsolver::DplltSolver<T>,
+fn verify_external_solver<T: dpllt::Theory>(
+    solver: &mut dpllt::DplltSolver<T>,
     ext_solver: &std::path::Path,
     filename: &str,
 ) -> bool {

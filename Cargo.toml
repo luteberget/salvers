@@ -1,0 +1,13 @@
+[workspace]
+
+members = [
+    "sattrait",
+    "dpllt",
+    "rc2",
+    "totalizer",
+    "idl",
+    "scheduleopt",
+]
+
+[profile.release]
+lto = true

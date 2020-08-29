@@ -1,8 +1,8 @@
-use mysatsolver;
+use dpllt;
 
 #[test]
 fn splitting_propagation_unsat() {
-    use mysatsolver::*;
+    use dpllt::*;
 
     struct UnsatTheory {
         have_added: bool,
@@ -30,7 +30,7 @@ fn splitting_propagation_unsat() {
 
 #[test]
 fn splitting_decision_unsat() {
-    use mysatsolver::*;
+    use dpllt::*;
 
     struct UnsatTheory {
         have_added: bool,

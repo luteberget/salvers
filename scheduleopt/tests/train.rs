@@ -1,4 +1,4 @@
-use disjunctivegraph;
+use scheduleopt;
 
 #[test]
 fn trains_test() {
@@ -9,7 +9,7 @@ fn trains_test() {
 }
 
 fn trains(t_d: i32) {
-    let mut s = disjunctivegraph::SchedulingSolver::new();
+    let mut s = scheduleopt::SchedulingSolver::new();
 
     // first train arrives/leaves station A at t=0, arrives at B (at least) 60 sec later,
     // leaves B 30 sec later, arrives at C 60 sec later.
