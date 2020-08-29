@@ -7,5 +7,5 @@ Various SAT-based Rust libraries for logic and optimization. Everything is very 
  * **`idl`**: graph-based solver for integer difference logic.
  * **`rc2`**: MaxSAT algorithm, very basic implementation of `https://pysathq.github.io/docs/html/api/examples/rc2.html`.
  * **`totalizer`**: Incremental totalizer for pseudo-boolean constraints.
- * **`disjunctivegraph`**: experimental backend for scheduling optimization problems using dynamic longest paths and and RC2-like SMT-based algorithm for optimization.
+ * **`scheduleopt`**: experimental backend for scheduling optimization problems using dynamic longest paths and and RC2-like SMT-based algorithm for optimization.
 
