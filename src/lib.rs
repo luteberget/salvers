@@ -2048,6 +2048,12 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     fn theory_refinement(&mut self) -> ClauseHeaderOffset {
+
+        // add new variables
+        while self.theory_refinement_buffer.next_var > self.next_var {
+           self.new_var_default();
+        }
+
         //let mut output = false;
         // first pass: push deductions to trail or convert them to conflicts
         {
@@ -2088,12 +2094,6 @@ impl<Th: Theory> DplltSolver<Th> {
                 if let RefinementItemMut::Clause(lits) =
                     self.theory_refinement_buffer.get_item_mut(i)
                 {
-	            for l in lits.iter() {
-                        while l.var().idx() as i32 >= self.next_var {
-                           self.new_var_default();
-                        }
-                    }
-
                     if lits.len() == 0 {
                         backtrack_level = 0;
                         conflict = CLAUSE_THEORY_UNDEF;
@@ -2136,7 +2136,7 @@ impl<Th: Theory> DplltSolver<Th> {
                     if lits.len() > 1 {
                         // attach
                         new_cref = self.clause_database.add_clause(lits, true);
-                        self.learnts.push(new_cref);
+                        self.clauses.push(new_cref);
                         self.attach_clause(new_cref);
                     }
 
