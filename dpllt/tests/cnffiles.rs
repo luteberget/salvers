@@ -57,11 +57,11 @@ fn hidden_clause_propagated_using_theory() {
         //print: bool,
         propagate_on_conflict: bool,
         check_only_relevant: bool,
-        qhead :usize,
+        qhead: usize,
     }
 
     impl HiddenClauseTheory {
-        pub fn add_clause(&mut self, lits :&[Lit]) {
+        pub fn add_clause(&mut self, lits: &[Lit]) {
             assert!(self.trail_lim.len() == 0); // add clauses on top-level
             self.clauses.push(lits.to_vec());
             self.qhead = 0; // check everything from the beginning
@@ -77,14 +77,14 @@ fn hidden_clause_propagated_using_theory() {
             }
 
             while self.qhead < self.trail.len() {
-                let l0 =  self.trail[self.qhead];
+                let l0 = self.trail[self.qhead];
                 self.qhead += 1;
                 self.lits.insert(l0.0);
 
                 // for every assigned lit, check every clause.
                 for (rref, c) in self.clauses.iter().enumerate() {
                     let is_relevant = c.iter().any(|l| *l == l0 || l.inverse() == l0);
-                    
+
                     //if self.print { println!(" relevant={} for {:?} in  {:?}", is_relevant, l0, c); }
                     if self.check_only_relevant && !is_relevant {
                         continue;
@@ -127,7 +127,12 @@ fn hidden_clause_propagated_using_theory() {
             // if we check only reelvant clauses, unit clauses may be forgotten
             if let Check::Final = check {
                 if self.check_only_relevant {
-                    for (rref,unit_clause) in self.clauses.iter().enumerate().filter(|(_,c)| c.len() == 1) {
+                    for (rref, unit_clause) in self
+                        .clauses
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, c)| c.len() == 1)
+                    {
                         match (
                             self.lits.contains(&unit_clause[0].0),
                             self.lits.contains(&unit_clause[0].inverse().0),
@@ -180,7 +185,7 @@ fn hidden_clause_propagated_using_theory() {
                     println!("rnd seed {:?}", rnd_seed);
                     //if !filename.contains("unit7") { return; }
                     if filename.contains("add") || filename.contains("prime65537") {
-                    //if filename.contains("add") {
+                        //if filename.contains("add") {
                         // some cases are too slow to be useful as default tests
                         return;
                     }
@@ -193,8 +198,8 @@ fn hidden_clause_propagated_using_theory() {
                     solver.theory.propagate_on_conflict = propagate_on_conflict;
                     solver.theory.check_only_relevant = check_only_relevant;
 
-                    //if filename.contains("unit4") { 
-                    //    solver.theory.print = true; 
+                    //if filename.contains("unit4") {
+                    //    solver.theory.print = true;
                     //    println!("UNIT4 SOLVER THEORY PRINT=true");
                     //}
 
