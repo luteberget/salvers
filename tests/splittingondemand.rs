@@ -44,14 +44,14 @@ fn splitting_decision_unsat() {
                 let a = buf.new_var();
                 let b = buf.new_var();
                 let c = buf.new_var();
-                buf.add_clause(vec![!a,!b,c]);
-                buf.add_clause(vec![ a,!b,c]);
-                buf.add_clause(vec![!a, b,c]);
-                buf.add_clause(vec![ a, b,c]);
-                buf.add_clause(vec![!a,!b,!c]);
-                buf.add_clause(vec![ a,!b,!c]);
-                buf.add_clause(vec![!a, b,!c]);
-                buf.add_clause(vec![ a, b,!c]);
+                buf.add_permanent_clause(vec![!a,!b,c]);
+                buf.add_permanent_clause(vec![ a,!b,c]);
+                buf.add_permanent_clause(vec![!a, b,c]);
+                buf.add_permanent_clause(vec![ a, b,c]);
+                buf.add_permanent_clause(vec![!a,!b,!c]);
+                buf.add_permanent_clause(vec![ a,!b,!c]);
+                buf.add_permanent_clause(vec![!a, b,!c]);
+                buf.add_permanent_clause(vec![ a, b,!c]);
 	    }
         }
 

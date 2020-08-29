@@ -14,6 +14,7 @@ pub enum Check {
     Final,
 }
 
+
 pub struct Refinement {
     last_clause_idx: i32,
     data: Vec<i32>,
@@ -25,7 +26,7 @@ impl Refinement {
         Refinement {
             last_clause_idx: -1,
             data: Vec::new(),
-		next_var
+	    next_var: next_var,
         }
     }
 
@@ -40,6 +41,11 @@ impl Refinement {
         self.data.push(0);
     }
 
+    pub fn new_permanent_clause(&mut self) {
+        self.last_clause_idx = self.data.len() as i32;
+        self.data.push(-2);
+    }
+
     pub fn new_var(&mut self) -> Lit {
         Lit::new(Var((self.next_var, self.next_var += 1).0), false)
     }
@@ -51,17 +57,20 @@ impl Refinement {
         self.last_clause_idx = -1;
     }
 
-    pub fn add_clause_lit(&mut self, lit: Lit) {
-        assert!(self.last_clause_idx >= 0 && self.last_clause_idx < self.data.len() as i32);
-        self.data[self.last_clause_idx as usize] += 1;
-        self.data.push(lit.0);
-    }
-
     pub fn add_clause_lits(&mut self, lits: impl IntoIterator<Item = Lit>) {
         assert!(self.last_clause_idx >= 0 && self.last_clause_idx < self.data.len() as i32);
+        assert!(self.data[self.last_clause_idx as usize] >= 0);
         let len0 = self.data.len();
         self.data.extend(lits.into_iter().map(|l| l.0));
         self.data[self.last_clause_idx as usize] += (self.data.len() - len0) as i32;
+    }
+
+    pub fn add_permanent_clause_lits(&mut self, lits: impl IntoIterator<Item = Lit>) {
+        assert!(self.last_clause_idx >= 0 && self.last_clause_idx < self.data.len() as i32);
+        assert!(self.data[self.last_clause_idx as usize] <= -2);
+        let len0 = self.data.len();
+        self.data.extend(lits.into_iter().map(|l| l.0));
+        self.data[self.last_clause_idx as usize] -= (self.data.len() - len0) as i32;
     }
 
     pub fn add_clause(&mut self, lits :impl IntoIterator<Item = Lit>) {
@@ -69,23 +78,37 @@ impl Refinement {
         self.add_clause_lits(lits);
     }
 
-    pub fn next_idx(&self, i: usize) -> usize {
-        assert!(self.data[i] >= -1);
-        if self.data[i] == -1 {
-            i + 3
+    pub fn add_permanent_clause(&mut self, lits :impl IntoIterator<Item = Lit>) {
+        self.new_permanent_clause();
+        self.add_permanent_clause_lits(lits);
+    }
+
+    pub fn data_len(&self, i: usize) -> usize {
+        if self.data[i] < -1 {
+            (-self.data[i] - 2) as usize
+        } else if self.data[i] == -1 {
+            2
         } else {
-            i + 1 + self.data[i] as usize
+            self.data[i] as usize
         }
+    }
+
+    pub fn next_idx(&self, i: usize) -> usize {
+	i + 1 + self.data_len(i)
     }
 
     pub fn get_item<'a>(&mut self, i: usize) -> RefinementItem<'a> {
         if self.data[i] == -1 {
             RefinementItem::Deduced(Lit(self.data[i + 1]), self.data[i + 2] as u32)
         } else {
-            let len = self.data[i] as usize;
-            RefinementItem::Clause(unsafe {
-                std::mem::transmute::<&[i32], &[Lit]>(&self.data[(i + 1)..(i + 1 + len)])
-            })
+            let len = self.data_len(i);
+            RefinementItem::Clause {
+                permanent: self.data[i] <= -2,
+		lits: unsafe {
+                std::mem::transmute::<& [i32], & [Lit]>(
+                    &self.data[(i + 1)..(i + 1 + len)],
+                )
+            }}
         }
     }
 
@@ -93,12 +116,14 @@ impl Refinement {
         if self.data[i] == -1 {
             RefinementItemMut::Deduced(Lit(self.data[i + 1]), self.data[i + 2] as u32)
         } else {
-            let len = self.data[i] as usize;
-            RefinementItemMut::Clause(unsafe {
+            let len = self.data_len(i);
+            RefinementItemMut::Clause {
+                permanent: self.data[i] <= -2,
+		lits: unsafe {
                 std::mem::transmute::<&mut [i32], &mut [Lit]>(
                     &mut self.data[(i + 1)..(i + 1 + len)],
                 )
-            })
+            }}
         }
     }
 }
@@ -106,13 +131,13 @@ impl Refinement {
 #[derive(Debug)]
 pub enum RefinementItem<'a> {
     Deduced(Lit, u32),
-    Clause(&'a [Lit]),
+    Clause { permanent: bool, lits: &'a [Lit] },
 }
 
 #[derive(Debug)]
 pub enum RefinementItemMut<'a> {
     Deduced(Lit, u32),
-    Clause(&'a mut [Lit]),
+    Clause { permanent: bool, lits: &'a mut [Lit] },
 }
 
 //pub enum Refinement {
@@ -1043,6 +1068,7 @@ impl<Th: Theory> DplltSolver<Th> {
         } else if self.add_tmp.len() == 1 {
             self.unchecked_enqueue(self.add_tmp[0], CLAUSE_NONE);
             //println!("addprop1 ok={}",self.ok);
+            //eprintln!("prop from add_clause");
             let confl = self.propagate();
             //println!("addprop2 confl={}",confl);
             self.ok = confl == CLAUSE_NONE;
@@ -1731,7 +1757,7 @@ impl<Th: Theory> DplltSolver<Th> {
             .explain(lit, rref, &mut self.theory_refinement_buffer);
         //println!("  ** theory-explain {:?}", self.theory_refinement_buffer.get_item_mut(0));
 
-        if let RefinementItemMut::Clause(lits) = self.theory_refinement_buffer.get_item_mut(0) {
+        if let RefinementItemMut::Clause { permanent: _, lits } = self.theory_refinement_buffer.get_item_mut(0) {
             Self::sort_theory_lemma(&self.assigns, &self.vardata, lits);
             assert!(lits[0] == lit);
             let (mut i, mut j) = (0, 0);
@@ -1905,6 +1931,7 @@ impl<Th: Theory> DplltSolver<Th> {
             self.trail.len()
         );
         //println!(" simplify1");
+            //eprintln!("prop from simplify");
         if !self.ok || self.propagate() != CLAUSE_NONE {
             //println!("SIMPLIFTY SET OK=FALSE");
             self.ok = false;
@@ -1980,6 +2007,7 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     fn propagate(&mut self) -> ClauseHeaderOffset {
+        //eprintln!("propagate with v={} c={} l={}", self.num_vars(), self.num_clauses(), self.num_learnts());
         let _p = hprof::enter("propagate");
         loop {
             self.theory_final_checked = false;
@@ -2091,7 +2119,7 @@ impl<Th: Theory> DplltSolver<Th> {
         {
             let mut i = 0;
             while i < self.theory_refinement_buffer.data.len() {
-                if let RefinementItemMut::Clause(lits) =
+                if let RefinementItemMut::Clause { permanent: _, lits } =
                     self.theory_refinement_buffer.get_item_mut(i)
                 {
                     if lits.len() == 0 {
@@ -2129,14 +2157,20 @@ impl<Th: Theory> DplltSolver<Th> {
         {
             let mut i = 0;
             while i < self.theory_refinement_buffer.data.len() {
-                if let RefinementItemMut::Clause(lits) =
+                if let RefinementItemMut::Clause { permanent, lits } =
                     self.theory_refinement_buffer.get_item_mut(i)
                 {
                     let mut new_cref = CLAUSE_NONE;
                     if lits.len() > 1 {
                         // attach
                         new_cref = self.clause_database.add_clause(lits, true);
-                        self.clauses.push(new_cref);
+
+                        if permanent {
+                            self.clauses.push(new_cref);
+			} else {
+                            self.learnts.push(new_cref);
+			}
+
                         self.attach_clause(new_cref);
                     }
 
@@ -2177,6 +2211,7 @@ impl<Th: Theory> DplltSolver<Th> {
 
         loop {
             //println!("search loop iter: start");
+//eprintln!("prop from search loop");
             let conflict_clause = self.propagate();
             //assert!( self.lemmas.len() == 0 ); // ?
             if conflict_clause != CLAUSE_NONE {
@@ -2216,6 +2251,7 @@ impl<Th: Theory> DplltSolver<Th> {
                     self.unchecked_enqueue(learnt_clause[0], CLAUSE_NONE);
                 } else {
                     let new_cref = self.clause_database.add_clause(&learnt_clause, true);
+//eprintln!("LEARN {:?}", learnt_clause);
                     self.learnts.push(new_cref);
                     self.attach_clause(new_cref);
                     self.clause_bump_activity(new_cref);
@@ -2278,7 +2314,7 @@ impl<Th: Theory> DplltSolver<Th> {
                 );
                 trace!("max learnts: {}", self.max_learnts);
                 if self.learnts.len() as f64 - self.trail.len() as f64 >= self.max_learnts {
-                    trace!("reduce_db");
+                    //eprintln!("reduce_db");
                     let _p = hprof::enter("sat reduce db");
                     self.reduce_db();
                 }
