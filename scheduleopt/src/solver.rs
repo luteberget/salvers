@@ -3,7 +3,9 @@ use log::*;
 pub use dpllt::Lit;
 use dpllt::*;
 use smallvec::SmallVec;
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
+use std::iter::once;
+use std::ops::Bound::{Excluded, Included};
 
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 /// Integer variable for use in scheduling constraints (see `SchedulingSolver`).
@@ -30,9 +32,9 @@ struct Sum {
     lit: Lit,
     bound: u32,
     current_value: i32,
-    min_violation: u32,
     nodes: SmallVec<[(Node, i32); 4]>,
     optimize: bool,
+    lower_bounds :BTreeMap<i32,Lit>,
 }
 
 struct SumWatcher {
@@ -69,7 +71,6 @@ impl SumWatcher {
         if new_value > sum.bound as i32 {
             //println!("Adding violation {:?}", sumref);
             violations.push(sumref);
-            sum.min_violation = sum.min_violation.min(sum.current_value as u32 - sum.bound);
         }
     }
 
@@ -129,6 +130,8 @@ struct SchedulingTheory {
 
     // perf counters
     num_sumwatcher_clauses: usize,
+    num_sumwatcher_short_clauses: usize,
+    num_sumwatcher_short_clauses_after_decide: usize,
     num_cycle_clauses: usize,
 }
 
@@ -148,6 +151,8 @@ impl SchedulingTheory {
             trail_lim: Vec::new(),
             num_sumwatcher_clauses: 0,
             num_cycle_clauses: 0,
+            num_sumwatcher_short_clauses: 0,
+            num_sumwatcher_short_clauses_after_decide: 0,
         }
     }
 
@@ -185,10 +190,60 @@ impl SchedulingTheory {
     }
 }
 
+
+fn fix_sums(theory :&mut SchedulingTheory, buf :&mut Refinement) {
+    for sumref in theory.sum_watcher.violations.drain(..) {
+        let _p = hprof::enter("theory sumrefcheck1");
+        let sum = &mut theory.sum_watcher.sum_constraints[sumref.idx()];
+        assert!(sum.current_value > sum.bound as i32);
+        let violation_value = sum.current_value;
+
+        let mut newlit = false;
+        // valuelit = (sumvalue >= violation_value)
+        let valuelit = *sum.lower_bounds.entry(violation_value)
+            .or_insert_with(|| { let l = buf.new_var(); newlit = true; l });
+
+        if newlit {
+            if let Some((_,prevlit)) = sum.lower_bounds.range((Included(i32::MIN), Excluded(violation_value))).next_back() {
+                // (sumvalue >= violation_value) => (sumvalue >= violation_value - diff)
+                // valuelit => prevlit
+                buf.add_permanent_clause(once(!valuelit).chain(once(*prevlit)));
+            } else {
+                // (sumvalue >= violation_value) => !(sumvalue <= sum.bound)
+                // valuelit => sum violation
+                buf.add_permanent_clause(once(!valuelit).chain(once(!sum.lit)));
+            }
+            if let Some((_,nextlit)) = sum.lower_bounds.range((Excluded(violation_value), Included(i32::MAX))).next() {
+                // nextlit => valuelit
+                buf.add_permanent_clause(once(!*nextlit).chain(once(valuelit)));
+            }
+        }
+
+        let critical_set = theory.graph.critical_set(sum.nodes.iter().map(|(n, _)| *n));
+        let map = &theory.edge_condition;
+        let reason = critical_set
+            .filter_map(|edge| map.get(&edge))
+            .map(|lit| !*lit);
+        let clause = once(valuelit).chain(reason);
+        let clause = clause.collect::<Vec<_>>();
+        theory.num_sumwatcher_clauses += 1;
+
+        if clause.len() == 1 {
+            theory.num_sumwatcher_short_clauses += 1;
+            if theory.trail_lim.len() > 0 {
+                theory.num_sumwatcher_short_clauses_after_decide += 1;
+            }
+        }
+
+        buf.add_clause(clause);
+    }
+}
+
 impl Theory for SchedulingTheory {
     fn check(&mut self, ch: Check, lits: &[Lit], buf: &mut Refinement) {
         let _p = hprof::enter("theory check");
-        //println!("Check {:?} {:?}", ch, lits);
+        //lrintln!("Check {:?} {:?}", ch, lits);
+
         #[cfg(debug_assertions)]
         assert!(!self.requires_backtrack);
 
@@ -197,36 +252,9 @@ impl Theory for SchedulingTheory {
             self.model = None;
         }
 
-        {
-            let _p = hprof::enter("theory sumrefcheck1");
-            for sumref in self.sum_watcher.violations.drain(..) {
-                //println!("sumref {:?}", sumref);
-                let sum = &self.sum_watcher.sum_constraints[sumref.idx()];
-                let critical_set = self.graph.critical_set(sum.nodes.iter().map(|(n, _)| *n));
-                let map = &self.edge_condition;
-                let reason = critical_set
-                    .filter_map(|edge| map.get(&edge))
-                    .map(|lit| !*lit);
-                let clause = std::iter::once(!sum.lit).chain(reason);
-
-                //println!("iter critical set...");
-                let clause = clause.collect::<Vec<_>>();
-                self.num_sumwatcher_clauses += 1;
-                //debug!("SUMWATCHER (1) Adding clause {:?}", clause);
-                //println!("iter critical set done");
-
-                buf.add_clause(clause);
-
-                //// Doesn't necessarily require backtrack... (?)
-                //#[cfg(debug_assertions)]
-                //{
-                //    self.requires_backtrack = true;
-                //}
-
-                //return;
-            }
-            //println!("sumref done.");
-        }
+        // Because of non-conditional edges in the graph we might have violated sums
+        // even without any bool var assignments.
+        fix_sums(self, buf);
 
         for lit in lits {
             if let Some(edge) = {
@@ -250,7 +278,7 @@ impl Theory for SchedulingTheory {
                     //debug!("SCHEDULING cycle constraint {:?}", cycle);
                     self.num_cycle_clauses += 1;
 
-                    buf.add_clause(cycle);
+                    buf.add_permanent_clause(cycle);
 
                     #[cfg(debug_assertions)]
                     {
@@ -262,33 +290,8 @@ impl Theory for SchedulingTheory {
                     self.trail.push(*edge);
                 }
 
-                {
-                    let _p = hprof::enter("theory sumcheck2");
-                    for sumref in self.sum_watcher.violations.drain(..) {
-                        let sum = &self.sum_watcher.sum_constraints[sumref.idx()];
-                        let critical_set =
-                            self.graph.critical_set(sum.nodes.iter().map(|(n, _)| *n));
-                        let map = &self.edge_condition;
-                        let reason = critical_set
-                            .filter_map(|edge| map.get(&edge))
-                            .map(|lit| !*lit);
-                        let clause = std::iter::once(!sum.lit).chain(reason);
+                fix_sums(self, buf);
 
-                        let clause = clause.collect::<Vec<_>>();
-                        //debug!("SUMWATCHER (2) Adding clause {:?}", clause);
-                        self.num_sumwatcher_clauses += 1;
-
-                        buf.add_clause(clause);
-
-                        //// Doesn't necessarily require backtrack... (?)
-                        //#[cfg(debug_assertions)]
-                        //{
-                        //    self.requires_backtrack = true;
-                        //}
-
-                        //return;
-                    }
-                }
             } else {
                 //println!("irrelevant lit {:?}", lit);
             }
@@ -296,15 +299,11 @@ impl Theory for SchedulingTheory {
 
         if let Check::Final = ch {
             // If we get here, the problem is SAT, so we preserve the model before backtracking.
-            //println!("Theory: FINAL SAT");
             if !self.model.is_some() {
                 let _p = hprof::enter("theory extractmodel");
-                //println!("extracting values");
                 self.model = Some(self.graph.all_values());
             }
         }
-
-        //println!("check done.");
     }
 
     fn explain(&mut self, _l: Lit, _x: u32, _buf: &mut Refinement) {
@@ -347,6 +346,7 @@ impl Theory for SchedulingTheory {
 /// TODO includes optimization criteria as monotone functions on the scheduling variables.
 pub struct SchedulingSolver {
     prop: DplltSolver<SchedulingTheory>,
+    cost: i32,
     was_sat: bool,
     num_cores: usize,
     num_sum_constraints: usize,
@@ -357,6 +357,7 @@ impl SchedulingSolver {
     pub fn new() -> Self {
         SchedulingSolver {
             prop: DplltSolver::new(SchedulingTheory::new()),
+            cost: 0,
             was_sat: false,
             num_cores: 0,
             num_sum_constraints: 0,
@@ -456,8 +457,8 @@ impl SchedulingSolver {
             lit,
             bound,
             current_value: 0,
-            min_violation: u32::MAX,
             optimize: true,
+            lower_bounds: BTreeMap::new(),
         });
         self.prop.theory.sum_by_lit.insert(lit, sumref);
         sumref
@@ -492,7 +493,7 @@ impl SchedulingSolver {
         // and they are implemented as a theory using diff constraints scheduling/longest paths.
 
         debug!("start optimize.");
-        let mut cost: i32 = 0;
+        //let mut cost: i32 = 0;
 
         //println!(" before optimization, sum constraints are:");
         //println!(" {:?}", self.prop.theory.sum_watcher.sum_constraints);
@@ -521,7 +522,7 @@ impl SchedulingSolver {
                 Ok(_) => {
                     drop(result);
                     let model = self.get_model().unwrap();
-                    return Ok((cost, model));
+                    return Ok((self.cost, model));
                 }
                 Err(ref mut core) => {
                     let _p = hprof::enter("optimize treat core");
@@ -536,18 +537,24 @@ impl SchedulingSolver {
                     }
 
                     let mut min_weight = u32::MAX;
-                    let mut sum_bound = 0;
+                    let mut total_sum_bound = 0;
                     let mut components = Vec::new();
                     for lit in core.iter() {
                         let sumref = self.prop.theory.sum_by_lit[lit];
                         let sum = &mut self.prop.theory.sum_watcher.sum_constraints[sumref.idx()];
-                        min_weight = min_weight.min(sum.min_violation);
+
+                        let (min_violated_value,_) = sum.lower_bounds.range((Excluded(sum.bound as i32), Included(i32::MAX))).next().unwrap();
+                        assert!(*min_violated_value > sum.bound as i32);
+                        let min_violation = *min_violated_value - sum.bound as i32;
+
+                        min_weight = min_weight.min(min_violation as u32);
                     }
 
                     for lit in core.iter() {
                         let new_lit = self.new_bool();
                         let sumref = self.prop.theory.sum_by_lit[lit];
                         let sum = &mut self.prop.theory.sum_watcher.sum_constraints[sumref.idx()];
+                        total_sum_bound += sum.bound;
                         sum.bound += min_weight;
 
                         for (nd, c) in sum.nodes.iter() {
@@ -557,39 +564,47 @@ impl SchedulingSolver {
                         // Instead of deleting this constraint and adding a new one, let's just
                         // increase the bound and find a new lit.
                         //self.delete_sum_constraint(sumref);
+                        assert!(sum.lit == *lit);
                         sum.lit = new_lit;
-                        sum.min_violation = u32::MAX;
-                        sum_bound += sum.bound;
                         self.prop.theory.sum_by_lit.remove(lit);
                         self.prop.theory.sum_by_lit.insert(new_lit, sumref);
+
+                        if let Some((_,violation)) = sum.lower_bounds.range((Excluded(sum.bound as i32), Included(i32::MAX))).next() {
+                            // violation => !sum.lit
+                            let v = *violation;
+                            self.add_clause(&vec![!new_lit, !v]);
+                        }
 
                         let graph = &self.prop.theory.graph;
                         self.prop
                             .theory
                             .sum_watcher
                             .evaluate(sumref, |v| graph.value(*v));
-
-                        // The main weakness I see here is that we forget about the `lit` which we
-                        // have already learnt a lot about from conflicts. Those clauses become wasted.
                     }
 
-                    cost += min_weight as i32;
-                    debug!("increased cost by {} to {}", min_weight, cost);
+                    self.cost += min_weight as i32;
+                    debug!("increased cost by {} to {}", min_weight, self.cost);
                     debug!(
-                        "#cores={}, #sums={}, #sumlearn={}, #cyclelearn={}",
+                        "#cores={}, #sums={}, #sumlearn={}, #short={}, #shortdc={}, #cyclelearn={}",
                         self.num_cores,
                         self.num_sum_constraints,
                         self.prop.theory.num_sumwatcher_clauses,
+                        self.prop.theory.num_sumwatcher_short_clauses,
+                        self.prop.theory.num_sumwatcher_short_clauses_after_decide,
                         self.prop.theory.num_cycle_clauses
                     );
                     debug_assert!(min_weight < u32::MAX);
 
                     if core.len() > 1 {
                         let sum_bool = self.new_bool();
-                        let new_sum = self.new_sum_constraint(sum_bool, sum_bound + min_weight);
+                        let new_sum = self.new_sum_constraint(sum_bool, total_sum_bound + min_weight);
                         for (nd, c) in components {
                             self.add_constraint_coeff(new_sum, IntVar(nd), c);
                         }
+
+                        // TODO here we can transfer combinations of the lower bounds for the
+                        // component sums?
+
                     }
 
                     //println!(" after treating the core, sum constraints are:");
