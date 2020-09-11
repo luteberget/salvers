@@ -1,5 +1,5 @@
-use scheduleopt;
 use itertools::Itertools;
+use scheduleopt;
 
 #[test]
 pub fn jobshop1() {

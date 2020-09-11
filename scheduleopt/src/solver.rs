@@ -1,9 +1,9 @@
 use crate::longestpaths::*;
-use log::*;
 pub use dpllt::Lit;
 use dpllt::*;
+use log::*;
 use smallvec::SmallVec;
-use std::collections::{HashMap, BTreeMap};
+use std::collections::{BTreeMap, HashMap};
 use std::iter::once;
 use std::ops::Bound::{Excluded, Included};
 
@@ -34,7 +34,7 @@ struct Sum {
     current_value: i32,
     nodes: SmallVec<[(Node, i32); 4]>,
     optimize: bool,
-    lower_bounds :BTreeMap<i32,Lit>,
+    lower_bounds: BTreeMap<i32, Lit>,
 }
 
 struct SumWatcher {
@@ -190,8 +190,7 @@ impl SchedulingTheory {
     }
 }
 
-
-fn fix_sums(theory :&mut SchedulingTheory, buf :&mut Refinement) {
+fn fix_sums(theory: &mut SchedulingTheory, buf: &mut Refinement) {
     for sumref in theory.sum_watcher.violations.drain(..) {
         let _p = hprof::enter("theory sumrefcheck1");
         let sum = &mut theory.sum_watcher.sum_constraints[sumref.idx()];
@@ -200,11 +199,18 @@ fn fix_sums(theory :&mut SchedulingTheory, buf :&mut Refinement) {
 
         let mut newlit = false;
         // valuelit = (sumvalue >= violation_value)
-        let valuelit = *sum.lower_bounds.entry(violation_value)
-            .or_insert_with(|| { let l = buf.new_var(); newlit = true; l });
+        let valuelit = *sum.lower_bounds.entry(violation_value).or_insert_with(|| {
+            let l = buf.new_var();
+            newlit = true;
+            l
+        });
 
         if newlit {
-            if let Some((_,prevlit)) = sum.lower_bounds.range((Included(i32::MIN), Excluded(violation_value))).next_back() {
+            if let Some((_, prevlit)) = sum
+                .lower_bounds
+                .range((Included(i32::MIN), Excluded(violation_value)))
+                .next_back()
+            {
                 // (sumvalue >= violation_value) => (sumvalue >= violation_value - diff)
                 // valuelit => prevlit
                 buf.add_permanent_clause(once(!valuelit).chain(once(*prevlit)));
@@ -213,7 +219,11 @@ fn fix_sums(theory :&mut SchedulingTheory, buf :&mut Refinement) {
                 // valuelit => sum violation
                 buf.add_permanent_clause(once(!valuelit).chain(once(!sum.lit)));
             }
-            if let Some((_,nextlit)) = sum.lower_bounds.range((Excluded(violation_value), Included(i32::MAX))).next() {
+            if let Some((_, nextlit)) = sum
+                .lower_bounds
+                .range((Excluded(violation_value), Included(i32::MAX)))
+                .next()
+            {
                 // nextlit => valuelit
                 buf.add_permanent_clause(once(!*nextlit).chain(once(valuelit)));
             }
@@ -291,7 +301,6 @@ impl Theory for SchedulingTheory {
                 }
 
                 fix_sums(self, buf);
-
             } else {
                 //println!("irrelevant lit {:?}", lit);
             }
@@ -543,7 +552,11 @@ impl SchedulingSolver {
                         let sumref = self.prop.theory.sum_by_lit[lit];
                         let sum = &mut self.prop.theory.sum_watcher.sum_constraints[sumref.idx()];
 
-                        let (min_violated_value,_) = sum.lower_bounds.range((Excluded(sum.bound as i32), Included(i32::MAX))).next().unwrap();
+                        let (min_violated_value, _) = sum
+                            .lower_bounds
+                            .range((Excluded(sum.bound as i32), Included(i32::MAX)))
+                            .next()
+                            .unwrap();
                         assert!(*min_violated_value > sum.bound as i32);
                         let min_violation = *min_violated_value - sum.bound as i32;
 
@@ -569,7 +582,11 @@ impl SchedulingSolver {
                         self.prop.theory.sum_by_lit.remove(lit);
                         self.prop.theory.sum_by_lit.insert(new_lit, sumref);
 
-                        if let Some((_,violation)) = sum.lower_bounds.range((Excluded(sum.bound as i32), Included(i32::MAX))).next() {
+                        if let Some((_, violation)) = sum
+                            .lower_bounds
+                            .range((Excluded(sum.bound as i32), Included(i32::MAX)))
+                            .next()
+                        {
                             // violation => !sum.lit
                             let v = *violation;
                             self.add_clause(&vec![!new_lit, !v]);
@@ -597,14 +614,14 @@ impl SchedulingSolver {
 
                     if core.len() > 1 {
                         let sum_bool = self.new_bool();
-                        let new_sum = self.new_sum_constraint(sum_bool, total_sum_bound + min_weight);
+                        let new_sum =
+                            self.new_sum_constraint(sum_bool, total_sum_bound + min_weight);
                         for (nd, c) in components {
                             self.add_constraint_coeff(new_sum, IntVar(nd), c);
                         }
 
                         // TODO here we can transfer combinations of the lower bounds for the
                         // component sums?
-
                     }
 
                     //println!(" after treating the core, sum constraints are:");

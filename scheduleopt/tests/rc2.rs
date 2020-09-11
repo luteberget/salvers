@@ -1,7 +1,7 @@
 //! MaxSAT optimization and scheduling logic.
 
-use scheduleopt;
 use rc2;
+use scheduleopt;
 
 #[test]
 pub fn opt() {

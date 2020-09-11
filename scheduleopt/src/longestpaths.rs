@@ -14,7 +14,7 @@ impl Node {
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Edge(u32);
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 struct EdgeData {
     source: i32,
     target: u32,
@@ -33,6 +33,24 @@ pub struct LongestPaths {
 
     current_updates: Vec<(u32, i32, i32)>, // node -> overwritten value
     queue: OrderHeap,
+}
+
+impl Clone for LongestPaths {
+    fn clone(&self) -> Self {
+        assert!(self.current_updates.len() == 0);
+        assert!(self.queue.is_empty());
+        LongestPaths {
+            n_nodes: self.n_nodes,
+            n_edges: self.n_edges,
+            edge_data: self.edge_data.clone(),
+            node_outgoing: self.node_outgoing.clone(),
+            node_incoming: self.node_incoming.clone(),
+            node_updated_from: self.node_updated_from.clone(),
+            values: self.values.clone(),
+            current_updates: Vec::new(),
+            queue: OrderHeap::new(),
+        }
+    }
 }
 
 pub struct Values {
