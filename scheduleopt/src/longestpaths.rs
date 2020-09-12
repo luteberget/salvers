@@ -241,6 +241,8 @@ impl LongestPaths {
             }
         }
 
+        self.current_updates.clear();
+
         Ok(())
     }
 
