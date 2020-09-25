@@ -60,10 +60,7 @@ impl<L: Lit> Totalizer<L> {
     }
 
     /// Get the literals represeting the count in unary encoding.
-    ///
-    /// Typically used as: 
-    ///  * If the literal `!rhs[i]` is true, then `rhs <= i`.
-    ///  * If the literal `rhs[i-1]` is true, then `rhs >= i`.
+    /// Forcing the literal `!rhs[i]` to be true makes `rhs <= i`.
     pub fn rhs(&self) -> &[L] {
         &self.lits
     }
