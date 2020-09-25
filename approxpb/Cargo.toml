@@ -1,0 +1,12 @@
+[package]
+name = "approxpb"
+version = "0.1.0"
+authors = ["Bjørnar Luteberget <Bjornar.Luteberget@sintef.no>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+sattrait = { path = "../sattrait" }
+totalizer = { path = "../totalizer" }
+ordered-float = "2.0"
