@@ -1,7 +1,13 @@
 use sattrait;
-use bitfield::bitfield;
 use log::{debug, info, trace};
 use std::io::Write;
+
+pub mod clausedb;
+use clausedb::*;
+pub mod bools;
+pub use bools::*;
+
+pub mod unitprop;
 
 // theory
 //
@@ -178,111 +184,8 @@ impl SatSolver {
     }
 }
 
-// ------
-// Variables and literals
-// ------
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Var(pub i32);
-const VAR_UNDEF: Var = Var(-1);
-
-impl Var {
-    pub fn idx(&self) -> usize {
-        self.0 as usize
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Lit(pub i32);
-
-impl Lit {
-    pub fn new(Var(var): Var, sign: bool) -> Lit {
-        Lit(2 * var + sign as i32)
-    }
-
-    pub fn sign(&self) -> bool {
-        ((self.0) & 1) != 0
-    }
-
-    pub fn var(&self) -> Var {
-        Var(self.0 >> 1)
-    }
-
-    pub fn inverse(&self) -> Lit {
-        Self::new(self.var(), !self.sign())
-    }
-}
-
-impl std::ops::Not for Lit {
-  type Output = Lit;
-  fn not(self) -> Lit { self.inverse() }
-}
-
-pub const LIT_UNDEF: Lit = Lit(-2);
-pub const LIT_ERROR: Lit = Lit(-1);
-
-//#[repr(u8)]
-//#[derive(Debug)]
-//#[derive(Copy, Clone, PartialEq, Eq)]
-//pub enum LBool {
-//    False = 0,
-//    True = 1,
-//    Undef = 2,
-//}
-
-#[derive(Debug, Copy, Clone)]
-pub struct LBool(u8);
-
-impl PartialEq for LBool {
-    fn eq(&self, rhs: &LBool) -> bool {
-        ((rhs.0 & 2) & (self.0 & 2)) != 0 || (((rhs.0 & 2) == 0) && rhs.0 == self.0)
-    }
-}
-
-pub const LBOOL_TRUE: LBool = LBool(0);
-pub const LBOOL_FALSE: LBool = LBool(1);
-pub const LBOOL_UNDEF: LBool = LBool(2);
-
-impl LBool {
-    fn xor(&self, b: bool) -> LBool {
-        //trace!("xor {} ^ {} = {}", self.0, (b as u8), self.0 ^ (b as u8));
-        LBool(self.0 ^ (b as u8))
-        //unsafe { std::mem::transmute((*self as u8) ^ (b as u8)) }
-    }
-    fn from_bool(b: bool) -> LBool {
-        LBool(b as u8)
-        //unsafe { std::mem::transmute(b) }
-    }
-
-    pub fn as_bool(&self) -> Option<bool> {
-        if *self == LBOOL_TRUE { return Some(true); }
-        if *self == LBOOL_FALSE { return Some(false); }
-        None
-    }
-}
-
-impl Default for LBool {
-    fn default() -> Self {
-        LBOOL_UNDEF
-    }
-}
-
 // TODO &&, ||
 
-bitfield! {
-    pub struct ClauseHeader(u32);
-    impl Debug;
-    get_mark, set_mark :1, 0;
-    get_learnt, set_learnt :2;
-    get_extra_data, set_extra_data :3;
-    get_reloced, set_reloced :4;
-    get_size, set_size :31, 5;
-}
-
-type ClauseHeaderOffset = i32;
-const CLAUSE_NONE: ClauseHeaderOffset = -1;
-const CLAUSE_THEORY_UNDEF: ClauseHeaderOffset = -2;
-const CLAUSE_THEORY_REFERENCE: ClauseHeaderOffset = -3;
 
 type VMap<T> = Vec<T>;
 
@@ -459,206 +362,6 @@ impl OrderHeap {
     }
 }
 
-struct ClauseDatabase {
-    clause_data: Vec<u32>,
-    wasted: u32,
-}
-
-impl ClauseDatabase {
-    fn relocate_clause(
-        &mut self,
-        cref: ClauseHeaderOffset,
-        new_data: &mut Vec<u32>,
-    ) -> ClauseHeaderOffset {
-        let header = self.get_header(cref);
-        if header.get_reloced() {
-            return *self.get_relocated_address(cref);
-        }
-
-        // copy
-        let size_in_u32 = 1 + header.get_size() as usize + header.get_extra_data() as usize;
-        let new_addr = new_data.len() as ClauseHeaderOffset;
-        new_data.extend(&self.clause_data[cref as usize..(cref as usize + size_in_u32)]);
-
-        // mark the old clause
-        self.get_header_mut(cref).set_reloced(true);
-        *self.get_relocated_address(cref) = new_addr;
-
-        // return new address
-        new_addr
-    }
-
-    fn update_size(&mut self, cref: ClauseHeaderOffset, new_size: usize) {
-        let mut header = self.get_header(cref);
-        if header.get_extra_data() {
-            let activity_addr = self.get_activity_address(cref);
-            self.clause_data[cref as usize + 1 + new_size] = self.clause_data[activity_addr];
-        }
-        header.set_size(new_size as u32);
-        *self.get_header_mut(cref) = header;
-    }
-
-    fn free(&mut self, cref: ClauseHeaderOffset) {
-        let header = self.get_header(cref);
-        self.wasted += 1 + header.get_size() + header.get_extra_data() as u32;
-    }
-
-    fn add_clause(&mut self, lits: &[Lit], learnt: bool) -> ClauseHeaderOffset {
-        let data_size = lits.len();
-
-        let mut header = ClauseHeader(0);
-        header.set_size(data_size as u32);
-        header.set_learnt(learnt);
-        header.set_extra_data(learnt); // TODO or extra clause field for simplification
-        let header = header;
-
-        let cref = self.clause_data.len() as i32;
-        self.clause_data
-            .push(unsafe { std::mem::transmute::<ClauseHeader, u32>(header) });
-        self.clause_data.extend(unsafe {
-            std::mem::transmute::<&[Lit],&[u32]>(lits)
-        });
-
-        if learnt {
-            self.clause_data
-                .push(unsafe { std::mem::transmute::<f32, u32>(0.0) });
-        }
-
-        cref
-    }
-
-    fn get_activity_address(&self, header_addr: ClauseHeaderOffset) -> usize {
-        let header = self.get_header(header_addr);
-        assert!(header.get_extra_data());
-        assert!(header.get_learnt());
-
-        header_addr as usize + 1 + header.get_size() as usize
-    }
-
-    fn get_activity<'a>(&'a self, header_addr: ClauseHeaderOffset) -> &'a f32 {
-        let addr = self.get_activity_address(header_addr);
-        unsafe { std::mem::transmute(&self.clause_data[addr]) }
-    }
-
-    fn get_activity_mut<'a>(&'a mut self, header_addr: ClauseHeaderOffset) -> &'a mut f32 {
-        let header = self.get_header(header_addr);
-        assert!(header.get_extra_data());
-        assert!(header.get_learnt());
-        unsafe {
-            let ptr = (self.clause_data.get_mut(header_addr as usize).unwrap() as *mut u32
-                as *mut f32)
-                //.offset((1 + header.get_size()) as isize * std::mem::size_of::<u32>() as isize);
-                .offset(1 + header.get_size() as isize);
-            &mut *ptr
-        }
-    }
-
-    fn get_clause<'a>(
-        &'a self,
-        header_addr: ClauseHeaderOffset,
-    ) -> (&'a ClauseHeader, &'a [Lit]) {
-        assert!(header_addr >= 0);
-        assert_eq!(
-            std::mem::size_of::<ClauseHeader>(),
-            std::mem::size_of::<u32>()
-        );
-        let val = &self.clause_data[header_addr as usize];
-        let header = unsafe { std::mem::transmute::<&u32, &ClauseHeader>(val) };
-        let size = header.get_size() as usize;
-        let lits = unsafe {
-            let ptr = (self.clause_data.get(header_addr as usize).unwrap() as *const u32
-                as *const  Lit)
-                //.offset(std::mem::size_of::<ClauseHeader>() as isize);
-                .offset(1); //std::mem::size_of::<ClauseHeader>() as isize);
-            std::slice::from_raw_parts(ptr, size)
-        };
-        (header, lits)
-    }
-
-    fn get_clause_mut<'a>(
-        &'a mut self,
-        header_addr: ClauseHeaderOffset,
-    ) -> (&'a mut ClauseHeader, &'a mut [Lit]) {
-        assert!(header_addr >= 0);
-        assert_eq!(
-            std::mem::size_of::<ClauseHeader>(),
-            std::mem::size_of::<u32>()
-        );
-        let val = &mut self.clause_data[header_addr as usize];
-        let header = unsafe { std::mem::transmute::<&mut u32, &mut ClauseHeader>(val) };
-        let size = header.get_size() as usize;
-        let lits = unsafe {
-            let ptr = (self.clause_data.get_mut(header_addr as usize).unwrap() as *mut u32
-                as *mut Lit)
-                //.offset(std::mem::size_of::<ClauseHeader>() as isize);
-                .offset(1); //std::mem::size_of::<ClauseHeader>() as isize);
-            std::slice::from_raw_parts_mut(ptr, size)
-        };
-        (header, lits)
-    }
-
-    fn get_header_mut<'a>(&'a mut self, header_addr: ClauseHeaderOffset) -> &'a mut ClauseHeader {
-        assert!(header_addr >= 0);
-        assert_eq!(
-            std::mem::size_of::<ClauseHeader>(),
-            std::mem::size_of::<u32>()
-        );
-        let val = &mut self.clause_data[header_addr as usize];
-        unsafe { std::mem::transmute::<&mut u32, &mut ClauseHeader>(val) }
-    }
-
-    fn get_header(&self, header_addr: ClauseHeaderOffset) -> ClauseHeader {
-        //info!("get header {}/{}", header_addr, self.clause_data.len());
-        assert!(header_addr >= 0);
-        assert_eq!(
-            std::mem::size_of::<ClauseHeader>(),
-            std::mem::size_of::<u32>()
-        );
-        let val = self.clause_data[header_addr as usize];
-        let h = unsafe { std::mem::transmute::<u32, ClauseHeader>(val) };
-        //println!("Header {:?}", h);
-        h
-    }
-
-    fn get_lits<'a>(&'a self, header_addr: ClauseHeaderOffset, size: usize) -> &'a [Lit] {
-        //println!("getting lits from {}..+{}", header_addr, size);
-        //let offset = std::mem::size_of::<ClauseHeader>() as isize;
-        //println!("offset {:?}", offset);
-        unsafe {
-            let ptr =
-                (&self.clause_data[header_addr as usize] as *const u32 as *const Lit).offset(1);
-            std::slice::from_raw_parts(ptr, size)
-        }
-    }
-
-    fn get_relocated_address<'a>(
-        &'a mut self,
-        header_addr: ClauseHeaderOffset,
-    ) -> &mut ClauseHeaderOffset {
-        unsafe {
-            let ptr = (self.clause_data.get_mut(header_addr as usize).unwrap() as *mut u32
-                as *mut ClauseHeaderOffset)
-                //.offset(std::mem::size_of::<ClauseHeader>() as isize);
-                .offset(1); //std::mem::size_of::<ClauseHeader>() as isize);
-            &mut *ptr
-        }
-    }
-
-    fn get_lits_mut<'a>(
-        &'a mut self,
-        header_addr: ClauseHeaderOffset,
-        size: usize,
-    ) -> &'a mut [Lit] {
-        unsafe {
-            let ptr = (self.clause_data.get_mut(header_addr as usize).unwrap() as *mut u32
-                as *mut Lit)
-                //.offset(std::mem::size_of::<ClauseHeader>() as isize);
-                .offset(1); //std::mem::size_of::<ClauseHeader>() as isize);
-            std::slice::from_raw_parts_mut(ptr, size)
-        }
-    }
-}
-
 pub struct DplltSolver<Th> {
     pub theory: Th, // TODO how to access?
 
@@ -678,7 +381,7 @@ pub struct DplltSolver<Th> {
     clauses: Vec<ClauseHeaderOffset>,
     learnts: Vec<ClauseHeaderOffset>,
 
-    trail: Vec<Lit>,
+    pub trail: Vec<Lit>,
     trail_lim: Vec<i32>,
     assumptions: Vec<Lit>,
 
