@@ -21,15 +21,17 @@ pub struct UnitPropagator {
   /// user-pushed assignment literals.
   const_lim: usize,
   qhead: usize,
+  false_lit :Option<Lit>,
 
   assigns :VMap<LBool>,
   watch_occs :LMap<Vec<Watcher>>,
   add_tmp :Vec<Lit>,
+  conflicting_clauses :Vec<ClauseHeaderOffset>,
 }
 
 impl UnitPropagator {
   pub fn new() -> Self {
-    UnitPropagator {
+    let mut obj = UnitPropagator {
         next_var: 0,
         clause_database: ClauseDatabase {
 	    clause_data :Vec::new(),
@@ -42,8 +44,17 @@ impl UnitPropagator {
         watch_occs: Vec::new(),
         add_tmp :Vec::new(),
         assigns: Vec::new(),
-    }
+        conflicting_clauses :Vec::new(),
+        false_lit: None,
+    };
+
+    let false_var = obj.new_var();
+    obj.add_clause(std::iter::once(!false_var));
+    obj.false_lit = Some(false_var);
+    obj
   }
+
+  pub fn is_ok(&self) -> bool { self.conflicting_clauses.len() == 0 }
 
   pub fn new_var(&mut self) -> Lit {
     let var = Var((self.next_var, self.next_var += 1).0);
@@ -63,7 +74,10 @@ impl UnitPropagator {
     }
 
     fn assigns_lit_value(assigns: &Vec<LBool>, lit: Lit) -> LBool {
-        LBool::xor(&assigns[lit.var().0 as usize], lit.sign())
+        let v = LBool::xor(&assigns[lit.var().0 as usize], lit.sign());
+        //println!("checking var {} {} = T{} F{} U{}", lit.var().0, lit.sign(), 
+	//	v == LBOOL_TRUE, v == LBOOL_FALSE, v == LBOOL_UNDEF);
+        v
     }
 
    pub fn backtrack(&mut self, pos :usize) {
@@ -71,57 +85,98 @@ impl UnitPropagator {
        let trail = &mut self.trail;
        let idx = self.const_lim + pos;
        for lit in trail.drain(idx..).rev() {
+//println!("unassigning v{:?} l{:?}", lit.var(), lit);
            assigns[lit.var().0 as usize] = LBOOL_UNDEF;
        }
        self.qhead = idx;
+
+       self.remove_nonconflicting();
    }
 
-   pub fn extend(&mut self, ps :impl IntoIterator<Item = Lit>) -> bool {
+   fn remove_nonconflicting(&mut self) {
+       let db = &self.clause_database;
+       let assigns = &self.assigns;
+       self.conflicting_clauses.retain(|cref| {
+           let header = db.get_header(*cref);
+           let sz = header.get_size();
+           assert!(sz > 1);
+           let lits = db.get_lits(*cref, sz as usize);
+           lits.iter().all(|l| Self::assigns_lit_value(assigns, *l) == LBOOL_FALSE)
+       });
+   }
+
+   pub fn extend(&mut self, ps :impl IntoIterator<Item = Lit>) -> (bool,&[Lit]) {
        for p in ps.into_iter() {
           self.assign(p);
        }
-       self.propagate() == CLAUSE_NONE
+       let len_before = self.trail.len();
+       let no_conflict = self.propagate() == CLAUSE_NONE;
+       let len_after = self.trail.len();
+       (no_conflict, &self.trail[len_before..len_after])
    }
 
    pub fn pos(&self) -> usize { self.trail.len() - self.const_lim }
 
    pub fn add_clause(&mut self, ps :impl IntoIterator<Item = Lit>) -> bool {
-       assert!(self.const_lim == self.trail.len());
-       assert!(self.pos() == 0);
- 
+
        self.add_tmp.clear();
        self.add_tmp.extend(ps);
        self.add_tmp.sort();
-       {
-           let mut prev = LIT_UNDEF;
-           let mut already_sat = false;
-           let add_tmp = &mut self.add_tmp;
-           let assigns = &self.assigns;
-           add_tmp.retain(|l| {
-               if Self::assigns_lit_value(assigns, *l) == LBOOL_TRUE || *l == prev.inverse() {
-                   already_sat = true;
-               }
-               (prev, prev=*l).0 != *l && Self::assigns_lit_value(assigns, *l) != LBOOL_FALSE
-           });
-           if already_sat { return true; }
-       }
+//println!("add clause {:?}", self.add_tmp);
 
-       if self.add_tmp.len() == 0 {
-          self.ok = false;
-          return false;
-       } else if self.add_tmp.len() == 1 {
-         self.assign(self.add_tmp[0]);
-         self.const_lim += 1;
-         self.ok = self.propagate() == CLAUSE_NONE;
-         return self.ok;
-       } else {
-         let cref = self.clause_database.add_clause(&self.add_tmp, false);
-         self.attach_clause(cref);
-       }
-       true
+       if self.pos() == 0 {
+           assert!(self.const_lim == self.trail.len());
+           assert!(self.pos() == 0);
+ 
+           {
+               let mut prev = LIT_UNDEF;
+               let mut already_sat = false;
+               let add_tmp = &mut self.add_tmp;
+               let assigns = &self.assigns;
+               add_tmp.retain(|l| {
+                   if Self::assigns_lit_value(assigns, *l) == LBOOL_TRUE || *l == prev.inverse() {
+                       already_sat = true;
+                   }
+                   (prev, prev=*l).0 != *l && Self::assigns_lit_value(assigns, *l) != LBOOL_FALSE
+               });
+               if already_sat { return true; }
+           }
+
+           if self.add_tmp.len() == 0 {
+              self.ok = false;
+              return false;
+           } else if self.add_tmp.len() == 1 {
+             self.assign(self.add_tmp[0]);
+             self.const_lim += 1;
+             self.ok = self.propagate() == CLAUSE_NONE;
+             return self.ok;
+           } else {
+             let cref = self.clause_database.add_clause(&self.add_tmp, false);
+             self.attach_clause(cref);
+           }
+           true
+      } else {
+          assert!(self.add_tmp.len() >= 1);
+          if self.add_tmp.len() == 1 {
+              self.add_tmp.push(self.false_lit.unwrap());
+          }
+          let cref = self.clause_database.add_clause(&self.add_tmp, false);
+          self.attach_clause(cref);
+          let assigns = &self.assigns;
+          
+	  //println!("unitprop: dynadd {:?}", self.add_tmp);
+          if self.add_tmp.iter().all(|l| Self::assigns_lit_value(assigns, *l) == LBOOL_FALSE) {
+            //println!("unitprop: added conflicting clause.");
+            self.conflicting_clauses.push(cref);
+          } else {
+            //println!("unitprop: added non-conflicting clause.");
+          }
+          true
+      }
    }
 
    fn assign(&mut self, l :Lit) {
+      if self.assigns[l.var().0 as usize] != LBOOL_UNDEF { panic!("assigning already assigned variable."); }
       self.assigns[l.var().0 as usize] = LBool::from_bool(l.sign());
       self.trail.push(l);
    }
@@ -209,6 +264,10 @@ impl UnitPropagator {
           }
 
           self.watch_occs[p.0 as usize].truncate(j);
+      }
+
+      if conflict_clause != CLAUSE_NONE { 
+	self.conflicting_clauses.push(conflict_clause);
       }
 
       conflict_clause
