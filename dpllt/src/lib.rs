@@ -2031,6 +2031,7 @@ impl<Th: Theory> DplltSolver<Th> {
                     if self.lit_value(p) == LBOOL_TRUE {
                         // dummy decision level
                         self.trail_lim.push(self.trail.len() as i32);
+                        self.theory.new_decision_level();
                     } else if self.lit_value(p) == LBOOL_FALSE {
                         self.analyze_final(p.inverse());
                         return LBOOL_FALSE;
