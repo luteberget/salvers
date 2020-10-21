@@ -162,6 +162,7 @@ pub trait Theory {
     fn explain(&mut self, lit: Lit, lref: u32, refinement: &mut Refinement);
     fn new_decision_level(&mut self);
     fn backtrack(&mut self, n: i32);
+    fn pick_branch_lit(&mut self, suggested :Lit) -> Lit { suggested }
 }
 
 pub struct NullTheory {}
@@ -2043,7 +2044,10 @@ impl<Th: Theory> DplltSolver<Th> {
 
                 if next == LIT_UNDEF {
                     self.stats.decisions += 1;
-                    next = self.pick_branch_lit();
+
+                    let internal_pick = self.pick_branch_lit();
+                    next = self.theory.pick_branch_lit(internal_pick);
+
                     //println!("pick lit {:?} vars left {}", next, self.order_heap.heap.len());
                     trace!("pick branch lit: {:?}", next);
                     if next == LIT_UNDEF {
