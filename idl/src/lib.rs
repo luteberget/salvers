@@ -171,7 +171,7 @@ impl InnerIdl {
         v
     }
 
-    fn add_constraint(&mut self, lit: Option<Lit>, DVar(x): DVar, DVar(y): DVar, k: i32) {
+    fn add_constraint(&mut self, lit: Option<Lit>, DVar(x): DVar, DVar(y): DVar, k: Domain) -> bool {
         let _g = hprof::enter("idl add constraint");
         let edge_idx = self.graph.edges.len() as u32;
         self.graph.edges.push(IdlEdge {
@@ -183,8 +183,9 @@ impl InnerIdl {
         self.graph.nodes[x as usize].out_edges.push(edge_idx);
         if let Some(lit) = lit {
             self.conditions.insert(lit, edge_idx);
+            true
         } else {
-            self.enable(edge_idx);
+            self.enable(edge_idx)
         }
     }
 
@@ -313,8 +314,9 @@ impl IdlSolver {
     /// assert!(s.get_int_value(x) + 5 <= s.get_int_value(y));
     /// assert!(s.get_int_value(y) + 5 <= s.get_int_value(z));
     /// ```
-    pub fn add_diff(&mut self, lit: Option<Lit>, x: DVar, y: DVar, k: i32) {
-        self.inner().add_constraint(lit, x, y, k);
+    pub fn add_diff(&mut self, lit: Option<Lit>, x: DVar, y: DVar, k: Domain) {
+        let ok = self.inner().add_constraint(lit, x, y, k);
+        if !ok { self.prop.add_clause(std::iter::empty()); }
     }
 
     pub fn solve<'a>(&'a mut self) -> Result<Model<'a>, ()> {
