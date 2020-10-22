@@ -42,7 +42,7 @@ pub fn jobshop1() {
                         // Constraint: times are greater than zero
                         s.add_diff(None, s.zero(), start_time, 0);
                         // Constraint: processing takes (at least) specified amount of time.
-                        s.add_diff(None, start_time, end_time, -(*processing_time as i32)); // start + proc <= end
+                        s.add_diff(None, start_time, end_time, -(*processing_time as i64)); // start + proc <= end
                         (start_time, end_time)
                     })
                     .collect::<Vec<_>>();

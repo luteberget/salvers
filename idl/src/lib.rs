@@ -5,6 +5,8 @@ use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 
+type Domain = i64;
+
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 /// Integer variable for use in difference constraints (see `IdlSolver`).
 pub struct DVar(u32);
@@ -28,13 +30,13 @@ struct IdlGraph {
     nodes: Vec<IdlNode>,
     edges: Vec<IdlEdge>,
 
-    update_dists: Vec<(u32, i32)>,
+    update_dists: Vec<(u32, Domain)>,
     queue: VecDeque<i32>,
 }
 
 #[derive(Debug)]
 struct IdlNode {
-    dist: i32,
+    dist: Domain,
     pred: i32,
     out_edges: SmallVec<[u32; 4]>,
 }
@@ -43,7 +45,7 @@ struct IdlNode {
 struct IdlEdge {
     from: i32, // negative sign means not enabled
     to: u32,
-    weight: i32,
+    weight: Domain,
     lit: Lit,
 }
 
@@ -67,10 +69,9 @@ impl IdlGraph {
         }
         edge.from *= -1;
 
-        // was it already feasible?
-        if self.nodes[edge.from as usize].dist + edge.weight >= self.nodes[edge.to as usize].dist {
-            return true;
-        }
+	if self.nodes[edge.from as usize].dist + edge.weight <= self.nodes[edge.to as usize].dist {
+	    return true;
+	}
 
         // update dists
         self.update_dists.clear();
@@ -86,7 +87,7 @@ impl IdlGraph {
             }
             let x = &self.nodes[edge.from as usize];
             let y = &self.nodes[edge.to as usize];
-            if x.dist + edge.weight < y.dist {
+            if x.dist + edge.weight > y.dist {
                 if updated_root && edge_idx == add_id as i32 {
                     // prepare the conflict vec for the caller to read
                     self.analyze_conflict(add_id);
@@ -176,7 +177,7 @@ impl InnerIdl {
         self.graph.edges.push(IdlEdge {
             from: -(x as i32),
             to: y,
-            weight: k,
+            weight: -k,
             lit: lit.unwrap_or(LIT_UNDEF),
         });
         self.graph.nodes[x as usize].out_edges.push(edge_idx);
@@ -336,9 +337,9 @@ impl IdlSolver {
         }
     }
 
-    pub fn get_int_value(&mut self, DVar(x): DVar) -> i32 {
+    pub fn get_int_value(&mut self, DVar(x): DVar) -> Domain {
         let idl = &self.prop.theory;
-        idl.graph.nodes[1].dist - idl.graph.nodes[x as usize].dist
+	idl.graph.nodes[x as usize].dist -  idl.graph.nodes[1].dist
     }
 
     pub fn get_bool_value(&self, lit :Lit) -> bool {
