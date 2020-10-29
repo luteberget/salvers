@@ -982,7 +982,7 @@ impl<Th: Theory> DplltSolver<Th> {
         // activity-based
         self.clean_order_heap();
         if next == VAR_UNDEF && !self.order_heap.is_empty() {
-            next = self.order_heap.remove_min(&self.activity);
+            next = self.order_heap.peek().unwrap();
         }
 
         // polarity
@@ -2065,6 +2065,12 @@ impl<Th: Theory> DplltSolver<Th> {
                 self.trail_lim.push(self.trail.len() as i32);
                 self.theory.new_decision_level();
                 self.unchecked_enqueue(next, CLAUSE_NONE);
+
+		// minisat removed from the heap in pick_branch_lit. We don't
+		// do that because the theory might override the selection. If
+		// we actually assigned to the minimum element of the heap
+		// (positive or negative), we remove it here.
+		self.clean_order_heap();
             }
         }
     }
