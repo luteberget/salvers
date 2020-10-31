@@ -25,32 +25,42 @@ struct InnerIdl {
 }
 
 #[derive(Debug)]
-struct IdlGraph {
-    conflict: Vec<Lit>,
-    nodes: Vec<IdlNode>,
-    edges: Vec<IdlEdge>,
+pub struct IdlGraph {
+    pub conflict: Vec<Lit>,
+    pub nodes: Vec<IdlNode>,
+    pub edges: Vec<IdlEdge>,
 
-    update_dists: Vec<(u32, Domain)>,
-    queue: VecDeque<i32>,
+    pub update_dists: Vec<(u32, Domain)>,
+    pub queue: VecDeque<i32>,
 }
 
 #[derive(Debug)]
-struct IdlNode {
-    dist: Domain,
-    pred: i32,
-    out_edges: SmallVec<[u32; 4]>,
+pub struct IdlNode {
+    pub dist: Domain,
+    pub pred: i32,
+    pub out_edges: SmallVec<[u32; 4]>,
 }
 
 #[derive(Debug)]
-struct IdlEdge {
-    from: i32, // negative sign means not enabled
-    to: u32,
-    weight: Domain,
-    lit: Lit,
+pub struct IdlEdge {
+    pub from: i32, // negative sign means not enabled
+    pub to: u32,
+    pub weight: Domain,
+    pub lit: Lit,
 }
 
 impl IdlGraph {
-    fn disable_edge(&mut self, del_id: u32) -> bool {
+    pub fn new() -> Self { IdlGraph 
+            {
+                conflict: Vec::new(),
+                nodes: Vec::new(),
+                edges: Vec::new(),
+                queue: VecDeque::new(),
+                update_dists: Vec::new(),
+            }
+    }
+
+    pub fn disable_edge(&mut self, del_id: u32) -> bool {
         //println!("disable {}", del_id);
         let edge = &mut self.edges[del_id as usize];
         if edge.from < 0 {
@@ -60,7 +70,7 @@ impl IdlGraph {
         true
     }
 
-    fn enable_edge(&mut self, add_id: u32) -> bool {
+    pub fn enable_edge(&mut self, add_id: u32) -> bool {
         let edge = &mut self.edges[add_id as usize];
 
         // was it already enabled?
@@ -117,7 +127,7 @@ impl IdlGraph {
         true
     }
 
-    fn analyze_conflict(&mut self, add_id: u32) {
+    pub fn analyze_conflict(&mut self, add_id: u32) {
         //println!("analyze {}: {:#?}", add_id, self);
         self.conflict.clear();
         let add_lit = self.edges[add_id as usize].lit;
@@ -147,13 +157,7 @@ impl InnerIdl {
             requires_backtrack: false,
             trail: Vec::new(),
             trail_lim: Vec::new(),
-            graph: IdlGraph {
-                conflict: Vec::new(),
-                nodes: Vec::new(),
-                edges: Vec::new(),
-                queue: VecDeque::new(),
-                update_dists: Vec::new(),
-            },
+            graph: IdlGraph::new(),
         };
         let _undef = idl.new_int();
         let _x0 = idl.new_int();
