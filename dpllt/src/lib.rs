@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use sattrait;
 use log::{debug, info, trace};
 use std::io::Write;
@@ -363,11 +365,23 @@ impl OrderHeap {
     }
 }
 
+pub enum TraceEntry {
+    Const(Lit),
+    Decision(Lit),
+    Propagation(Lit),
+    Conflict(i32),
+    Learn(i32),
+    Pop(usize),
+}
+
 pub struct DplltSolver<Th> {
     pub theory: Th, // TODO how to access?
 
     #[cfg(feature = "trace")]
     pub tracelog_file: Option<std::io::BufWriter<std::fs::File>>,
+
+    #[cfg(feature = "searchtrace")]
+    pub searchtracelog_file: Option<std::io::BufWriter<std::fs::File>>,
 
     pub verbosity: u32,
     // Extra results (read-only for consumer)
@@ -429,6 +443,10 @@ pub struct DplltSolver<Th> {
     conflict_budget: i64,
     propagation_budget: i64,
     asynch_interrupt: bool,
+    solve_start :Option<cpu_time::ProcessTime>,
+    
+    #[cfg(feature = "named_vars")]
+    pub var_names :HashMap<Var, String>,
 }
 
 pub struct SolverParams {
@@ -529,6 +547,9 @@ impl<Th: Theory> DplltSolver<Th> {
             #[cfg(feature = "trace")]
             tracelog_file: None,
 
+            #[cfg(feature = "searchtrace")]
+            searchtracelog_file: None,
+
             verbosity: 1,
             watch_occs: Vec::new(),
             watch_dirty: Vec::new(),
@@ -585,10 +606,71 @@ impl<Th: Theory> DplltSolver<Th> {
             // substructs
             params: Default::default(),
             stats: Default::default(),
+
+	    solve_start :None,
+
+            #[cfg(feature = "named_vars")]
+            var_names :HashMap::new(),
         }
     }
 
    pub fn new_var_default(&mut self) -> Lit { self.new_var(LBOOL_UNDEF, true) }
+
+   #[cfg(feature = "named_vars")]
+   pub fn named_var(&mut self, name :String) -> Lit {
+       let lit = self.new_var_default();
+       if name.contains('!') || name.contains(';') {
+           panic!("dpllt: var names cannot contain ! or ; ");
+       }
+       self.var_names.insert(lit.var(), name);
+       lit
+   }
+
+   #[cfg(feature = "named_vars")]
+   pub fn name(names :&HashMap<Var, String>, name :Lit) -> String {
+       let mut s1 = names.get(&name.var()).cloned()
+           .unwrap_or_else(|| format!("v{}", name.var().0));
+       if !name.sign() {
+           s1.insert(0, '!');
+       }
+       s1
+   }
+
+   #[cfg(all(feature = "searchtrace", feature="named_vars"))]
+   pub fn write_trace<'a>(&'a mut self, entry :TraceEntry) {
+       if let Some(f) = self.searchtracelog_file.as_mut() {
+           match entry {
+               TraceEntry::Const(l) => {
+                   writeln!(f, "set c {}", Self::name(&self.var_names, l)).unwrap();
+               },
+               TraceEntry::Decision(l) => {
+                   writeln!(f, "set d {}", Self::name(&self.var_names, l)).unwrap();
+               },
+               TraceEntry::Propagation(l) => {
+                   writeln!(f, "set p {}", Self::name(&self.var_names, l)).unwrap();
+               },
+               TraceEntry::Conflict(c) | TraceEntry::Learn(c) => {
+                   let lits = self.clause_database.get_clause(c).1;
+                   if matches!(entry, TraceEntry::Conflict(_)) {
+                       write!(f, "conflict").unwrap();
+                   } else {
+                       write!(f, "learn").unwrap();
+                   }
+                   for l in lits {
+                       write!(f, " {}", Self::name(&self.var_names, *l)).unwrap();
+                   }
+                   writeln!(f, "").unwrap();
+               },
+               TraceEntry::Pop(n) => {
+                   writeln!(f, "pop {}", n).unwrap();
+               }
+           }
+       }
+   }
+
+   #[cfg(any(not(feature = "searchtrace"), not(feature = "named_vars")))]
+   pub fn write_trace<'a>(&'a mut self, _entry :TraceEntry) {
+   }
 
     pub fn new_var(&mut self, user_polarity: LBool, decision_var: bool) -> Lit {
         let var = if let Some(var) = self.free_vars.pop() {
@@ -947,6 +1029,7 @@ impl<Th: Theory> DplltSolver<Th> {
             self.trail_lim.truncate(level as usize);
             trace!("traillen {} -> {}", l2, self.trail_lim.len());
 
+            self.write_trace(TraceEntry::Pop(l2-l1));
             self.theory.backtrack(level);
         }
     }
@@ -1254,6 +1337,15 @@ impl<Th: Theory> DplltSolver<Th> {
             level: self.trail_lim.len() as i32,
         };
         self.trail.push(lit);
+
+        if self.trail_lim.len() == 0 {
+            self.write_trace(TraceEntry::Const(lit));
+        } else if reason != CLAUSE_NONE  {
+            self.write_trace(TraceEntry::Propagation(lit));
+        } else {
+            self.write_trace(TraceEntry::Decision(lit));
+        }
+
     }
 
     fn propagate_bool(&mut self) -> ClauseHeaderOffset {
@@ -1348,6 +1440,9 @@ impl<Th: Theory> DplltSolver<Th> {
                         self.learnts.iter().position(|i| *i == cref)
                     );
                     //println!("Conflict in {:?}", self.clause_database.get_clause(cref));
+
+                    self.write_trace(TraceEntry::Conflict(cref));
+
                     conflict_clause = cref;
                     self.qhead = self.trail.len();
                     while i < self.watch_occs[p.0 as usize].len() {
@@ -1853,6 +1948,9 @@ impl<Th: Theory> DplltSolver<Th> {
             }
 
 	    if backtrack_level < self.trail_lim.len() as i32 {
+              //println!("theory backtracking {:.3}%", 
+	      //  (self.trail_lim.len()  - backtrack_level as usize) as f64 / 
+	      //  self.trail_lim.len() as f64 * 100.0);
               self.cancel_until(backtrack_level);
             }
         }
@@ -1958,6 +2056,7 @@ impl<Th: Theory> DplltSolver<Th> {
 //eprintln!("LEARN {:?}", learnt_clause);
                     self.learnts.push(new_cref);
                     self.attach_clause(new_cref);
+                    self.write_trace(TraceEntry::Learn(new_cref));
                     self.clause_bump_activity(new_cref);
                     self.unchecked_enqueue(learnt_clause[0], new_cref);
                 }
@@ -2106,6 +2205,7 @@ impl<Th: Theory> DplltSolver<Th> {
 
     pub fn solve(&mut self) -> LBool {
         let _p = hprof::enter("sat solve");
+	self.solve_start = Some(cpu_time::ProcessTime::now());
         debug!("-> SOLVE");
         self.model.clear();
         self.conflict.clear();
