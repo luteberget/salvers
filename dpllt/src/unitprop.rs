@@ -65,7 +65,7 @@ impl UnitPropagator {
   }
 
 
-    fn var_value(&self, var: Var) -> LBool {
+    pub fn var_value(&self, var: Var) -> LBool {
         self.assigns[var.0 as usize]
     }
 
@@ -198,7 +198,7 @@ impl UnitPropagator {
 
    fn propagate(&mut self) -> ClauseHeaderOffset {
       let mut conflict_clause = CLAUSE_NONE;
-      let mut num_props = 0;
+      //let mut num_props = 0;
       while self.qhead < self.trail.len() {
           let p = self.trail[self.qhead];
           self.qhead += 1;
@@ -274,9 +274,9 @@ impl UnitPropagator {
    }
 }
 
-fn var_map_insert<T: Default + Clone>(map: &mut Vec<T>, Var(idx): Var, value: T, default: T) {
-    map_insert(map, idx as usize, value, default)
-}
+//fn var_map_insert<T: Default + Clone>(map: &mut Vec<T>, Var(idx): Var, value: T, default: T) {
+//    map_insert(map, idx as usize, value, default)
+//}
 
 fn map_insert<T: Default + Clone>(map: &mut Vec<T>, idx: usize, value: T, default: T) {
     map.resize((idx as usize + 1).max(map.len()), default);
