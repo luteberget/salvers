@@ -7,7 +7,7 @@ impl Test {
         todo!()
     }
 }
-#[derive(Copy, Clone, Hash)]
+#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TestLit(isize);
 impl std::ops::Not for TestLit {
     type Output = Self;
@@ -16,7 +16,17 @@ impl std::ops::Not for TestLit {
         Self(-self.0)
     }
 }
-impl Lit for TestLit {}
+impl Lit for TestLit {
+    type Var = i32;
+
+    fn into_var(self) -> (Self::Var, bool) {
+        todo!()
+    }
+
+    fn from_var_sign(v :Self::Var, sign :bool) -> Self {
+        todo!()
+    }
+}
 
 impl SatInstance<TestLit> for Test {
     fn new_var(&mut self) -> Bool<TestLit> {
@@ -54,6 +64,8 @@ fn test_solver() {
     let a = solver.new_var();
     let b = solver.new_var();
     let v = vec![a, b];
+    let finset = FinSet::new(&mut solver, vec![9,8,7]);
+    solver.assert_parity(vec![finset.has_value(&7)], false);
     solver.add_clause(v);
     if let SatResult::Sat(model) = solver.solve() {
         let v1 = model.value(&a);

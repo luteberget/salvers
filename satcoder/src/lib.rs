@@ -5,14 +5,28 @@ mod finset;
 mod symbolic;
 mod theory;
 mod testsolver;
+mod model_eq;
+mod boolenc;
+pub mod solvers;
 
 pub use crate::bool::Bool;
 pub use crate::symbolic::{Symbolic, SymbolicModel};
 pub use crate::finset::FinSet;
 pub use crate::theory::{Theory, Refinement};
+pub use crate::boolenc::BooleanFormulas;
+
+/// A variable in a SAT problem.
+pub trait Var: Copy + Clone + PartialEq + Eq + PartialOrd + Ord + Hash {}
+
+impl Var for i32{}
 
 /// A literal in a SAT problem.
-pub trait Lit: std::ops::Not<Output = Self> + Copy + Clone + Hash {}
+pub trait Lit: std::ops::Not<Output = Self> + Copy + Clone + PartialEq + Eq + PartialOrd + Ord + Hash {
+    type Var : Var;
+
+    fn into_var(self) -> (Self::Var, bool);
+    fn from_var_sign(v :Self::Var, sign :bool) -> Self;
+}
 
 /// An instance of a SAT problem (corresponds to a solver object).
 pub trait SatInstance<L: Lit> {
@@ -33,7 +47,7 @@ pub enum SatResult<'a, L: Lit> {
 
 pub enum SatResultWithCore<'a, L: Lit> {
     Sat(Box<dyn SatModel<L = L> + 'a>),
-    Unsat(Box<dyn ExactSizeIterator<Item = L> + 'a>),
+    Unsat(Box<[L]>),
 }
 
 pub trait SatSolver {
