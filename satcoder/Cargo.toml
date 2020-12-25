@@ -12,5 +12,6 @@ default = ["solver_minisat", "solver_cadical"]
 [dependencies]
 minisat = { path = "../../minisat-rs", optional = true }
 cadical = { version = "0.1", optional = true }
+dpllt = { path = "../dpllt" }
 
 
