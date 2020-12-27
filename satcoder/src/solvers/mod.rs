@@ -11,4 +11,6 @@ mod cadical;
 pub use self::cadical::{Cadical, CdcLit, CdcVar};
 
 mod dpllt;
-pub use ::dpllt::SatSolver as DPLLT;
+pub use ::dpllt::SatSolver as DPLLTSat;
+
+pub use ::dpllt as dplltsolver;
