@@ -1,4 +1,6 @@
 #![allow(dead_code, unused_variables)]
+use crate::constraints::*;
+use crate::symbolic::*;
 use crate::*;
 
 pub struct Test {}
@@ -23,7 +25,7 @@ impl Lit for TestLit {
         todo!()
     }
 
-    fn from_var_sign(v :Self::Var, sign :bool) -> Self {
+    fn from_var_sign(v: Self::Var, sign: bool) -> Self {
         todo!()
     }
 }
@@ -44,9 +46,9 @@ pub struct TestModel<'a> {
 }
 
 impl<'a> SatModel for TestModel<'a> {
-    type L = TestLit;
+    type Lit = TestLit;
 
-    fn lit_value(&self, l: &Self::L) -> bool {
+    fn lit_value(&self, l: &Self::Lit) -> bool {
         todo!()
     }
 }
@@ -64,7 +66,7 @@ fn test_solver() {
     let a = solver.new_var();
     let b = solver.new_var();
     let v = vec![a, b];
-    let finset = FinSet::new(&mut solver, vec![9,8,7]);
+    let finset = FinSet::new(&mut solver, vec![9, 8, 7]);
     solver.assert_parity(vec![finset.has_value(&7)], false);
     solver.add_clause(v);
     if let SatResult::Sat(model) = solver.solve() {
@@ -78,4 +80,3 @@ fn test_solver() {
         let v2 = model.value(&b);
     };
 }
-

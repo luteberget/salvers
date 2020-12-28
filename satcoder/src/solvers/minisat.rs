@@ -1,44 +1,48 @@
+//! [MiniSAT](http://minisat.se/)
 use crate::*;
 
-use ::minisat::Lit as SLit;
-use ::minisat::Var as SVar;
+pub use ::minisat::Lit;
+pub use ::minisat::Solver;
+pub use ::minisat::Var;
 
-impl Var for SVar {}
-impl Lit for SLit {
-    type Var = SVar;
+pub type Bool = crate::Bool<Lit>;
+
+impl crate::Var for Var {}
+impl crate::Lit for Lit {
+    type Var = Var;
 
     fn into_var(self) -> (Self::Var, bool) {
-        SLit::var(self)
+        Lit::var(self)
     }
 
     fn from_var_sign(v: Self::Var, sign: bool) -> Self {
-        SLit::from_var_sign(v, sign)
+        Lit::from_var_sign(v, sign)
     }
 }
 
-impl SatInstance<SLit> for ::minisat::Solver {
-    fn new_var(&mut self) -> Bool<SLit> {
+impl SatInstance<Lit> for ::minisat::Solver {
+    fn new_var(&mut self) -> Bool {
         Bool::Lit(self.new_lit())
     }
 
-    fn add_clause<IL: Into<Bool<SLit>>, I: IntoIterator<Item = IL>>(&mut self, clause: I) {
-        ::minisat::Solver::add_clause(
-            self,
-            clause.into_iter().filter_map(|i| match i.into() {
-                Bool::Lit(l) => Some(l),
-                Bool::Const(true) => None,
-                Bool::Const(false) => panic!("unsat"),
-            }),
-        )
+    fn add_clause<IL: Into<Bool>, I: IntoIterator<Item = IL>>(&mut self, clause: I) {
+        if let Ok(lits) = clause.into_iter().filter_map(|i| match i.into() {
+                Bool::Lit(l) => Some(Ok(l)),
+                Bool::Const(false) => None,
+                Bool::Const(true) => Some(Err(())),
+        }).collect::<Result<Vec<Lit>, ()>>() {
+
+            ::minisat::Solver::add_clause(self, lits);
+        }
     }
 }
 
 impl SatSolverWithCore for ::minisat::Solver {
-    type Lit = SLit;
+    type Lit = Lit;
 
     fn solve_with_assumptions<'a>(
         &'a mut self,
-        assumptions: impl IntoIterator<Item = Bool<Self::Lit>>,
+        assumptions: impl IntoIterator<Item = crate::Bool<Self::Lit>>,
     ) -> SatResultWithCore<'a, Self::Lit> {
         match ::minisat::Solver::solve_under_assumptions(
             self,
@@ -50,7 +54,10 @@ impl SatSolverWithCore for ::minisat::Solver {
         ) {
             Ok(m) => SatResultWithCore::Sat(Box::new(m)),
             Err(c) => {
-                let vec = c.iter().collect::<Vec<_>>();
+                // MiniSAT gives a conflict clause, we want an 
+                // unsat core, so invert each literal.
+                let vec = c.iter().map(|c| !c).collect::<Vec<_>>();
+
                 SatResultWithCore::Unsat(vec.into_boxed_slice())
             }
         }
@@ -58,7 +65,7 @@ impl SatSolverWithCore for ::minisat::Solver {
 }
 
 impl SatSolver for ::minisat::Solver {
-    type Lit = SLit;
+    type Lit = Lit;
 
     fn solve<'a>(&'a mut self) -> SatResult<'a, Self::Lit> {
         match self.solve_with_assumptions(std::iter::empty()) {
@@ -69,9 +76,9 @@ impl SatSolver for ::minisat::Solver {
 }
 
 impl<'a> SatModel for ::minisat::Model<'a> {
-    type L = SLit;
+    type Lit = Lit;
 
-    fn lit_value(&self, l: &Self::L) -> bool {
+    fn lit_value(&self, l: &Self::Lit) -> bool {
         ::minisat::Model::lit_value(self, l)
     }
 }

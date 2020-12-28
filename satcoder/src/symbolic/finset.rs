@@ -1,4 +1,4 @@
-use crate::*;
+use crate::{constraints::*, symbolic::*, *};
 
 #[derive(Debug)]
 pub struct FinSet<L: Lit, T>(Vec<(Bool<L>, T)>);
@@ -16,9 +16,13 @@ impl<L: Lit, T> FinSet<L, T> {
             FinSet(vec![(l, a), (!l, b)])
         } else {
             let lits = xs.iter().map(|_| solver.new_var()).collect::<Vec<_>>();
-            // TODO solver.assert_exactly_one(lits...);
+            solver.assert_exactly_one(lits.iter().copied());
             FinSet(lits.into_iter().zip(xs.into_iter()).collect())
         }
+    }
+
+    pub fn domain(&self) -> impl Iterator<Item = &T> {
+        self.0.iter().map(|(_, v)| v)
     }
 }
 
@@ -33,10 +37,10 @@ impl<L: Lit, T: Eq> FinSet<L, T> {
     }
 }
 
-impl<'a, L: Lit, FT : 'a> Symbolic<'a, L> for FinSet<L, FT> {
+impl<'a, L: Lit, FT: 'a> Symbolic<'a, L> for FinSet<L, FT> {
     type T = &'a FT;
 
-    fn interpret(&'a self, m: &dyn SatModel<L = L>) -> Self::T {
+    fn interpret(&'a self, m: &dyn SatModel<Lit = L>) -> Self::T {
         for (v, x) in &self.0 {
             if m.value(v) {
                 return x;

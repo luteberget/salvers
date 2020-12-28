@@ -1,16 +1,11 @@
-#[cfg(feature="minisat")]
-mod minisat;
+//! # SAT solvers
+//!
+//! Import one of these in your program.
 
-#[cfg(feature="minisat")]
-pub use ::minisat::Solver as Minisat;
+#[cfg(feature = "minisat")]
+pub mod minisat;
 
-#[cfg(feature="cadical")]
-mod cadical;
+#[cfg(feature = "cadical")]
+pub mod cadical;
 
-#[cfg(feature="cadical")]
-pub use self::cadical::{Cadical, CdcLit, CdcVar};
-
-mod dpllt;
-pub use ::dpllt::SatSolver as DPLLTSat;
-
-pub use ::dpllt as dplltsolver;
+pub mod dpllt;

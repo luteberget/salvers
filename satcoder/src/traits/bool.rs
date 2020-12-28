@@ -1,19 +1,19 @@
 use crate::Lit;
 
 /// A boolean value -- either a variable in a SAT problem, or a constant boolean value.
-#[derive(Debug, Copy, Clone, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Bool<L: Lit> {
     Lit(L),
     Const(bool),
 }
 
-impl <L:Lit> From<L> for Bool<L> {
+impl<L: Lit> From<L> for Bool<L> {
     fn from(l: L) -> Self {
         Bool::Lit(l)
     }
 }
 
-impl <L:Lit> From<bool> for Bool<L> {
+impl<L: Lit> From<bool> for Bool<L> {
     fn from(b: bool) -> Self {
         Bool::Const(b)
     }

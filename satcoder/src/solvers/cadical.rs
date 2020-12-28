@@ -1,30 +1,35 @@
+//! [CaDiCaL SAT Solver](http://fmv.jku.at/cadical/)
+
 use crate::*;
 
-#[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
-pub struct CdcLit(i32);
+pub type Bool = crate::traits::Bool<Lit>;
+pub use self::Cadical as Solver;
 
-impl std::ops::Not for CdcLit {
-    type Output = CdcLit;
+#[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
+pub struct Lit(i32);
+
+impl std::ops::Not for Lit {
+    type Output = Lit;
 
     fn not(self) -> Self::Output {
-        CdcLit(-self.0)
+        Lit(-self.0)
     }
 }
 
 #[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
-pub struct CdcVar(u32);
+pub struct Var(u32);
 
-impl Var for CdcVar {}
+impl crate::Var for Var {}
 
-impl Lit for CdcLit {
-    type Var = CdcVar;
+impl crate::Lit for Lit {
+    type Var = Var;
 
     fn into_var(self) -> (Self::Var, bool) {
-        (CdcVar(self.0.abs() as u32), self.0 < 0)
+        (Var(self.0.abs() as u32), self.0 < 0)
     }
 
     fn from_var_sign(v: Self::Var, sign: bool) -> Self {
-        CdcLit(if sign { -(v.0 as i32) } else { v.0 as i32 })
+        Lit(if sign { -(v.0 as i32) } else { v.0 as i32 })
     }
 }
 
@@ -48,66 +53,79 @@ impl Cadical {
     }
 }
 
-impl SatInstance<CdcLit> for Cadical {
-    fn new_var(&mut self) -> Bool<CdcLit> {
-        let l = Bool::Lit(CdcLit(self.next_var as i32));
+impl SatInstance<Lit> for Cadical {
+    fn new_var(&mut self) -> Bool {
+        let l = Bool::Lit(Lit(self.next_var as i32));
         self.next_var += 1;
         l
     }
 
-    fn add_clause<IL: Into<Bool<CdcLit>>, I: IntoIterator<Item = IL>>(&mut self, clause: I) {
-        self.cadical.add_clause(clause.into_iter().filter_map(|l| match l.into() {
-            Bool::Const(true) => None,
-            Bool::Const(false) => panic!(),
-            Bool::Lit(CdcLit(x)) => Some(x),
-        }))
+    fn add_clause<IL: Into<Bool>, I: IntoIterator<Item = IL>>(&mut self, clause: I) {
+            let lits = clause.into_iter().filter_map(|l| match l.into() {
+                Bool::Const(false) => None,
+                Bool::Const(true) => Some(Err(())),
+                Bool::Lit(Lit(x)) => Some(Ok(x)),
+            }).collect::<Result<Vec<_>,()>>();
+            if let Ok(lits) = lits {
+                self.cadical.add_clause(lits.iter().cloned());
+            }
     }
 }
 
 impl SatSolver for Cadical {
-    type Lit = CdcLit;
+    type Lit = Lit;
 
     fn solve<'a>(&'a mut self) -> SatResult<'a, Self::Lit> {
         match self.cadical.solve() {
             Some(true) => SatResult::Sat(Box::new(CadicalModel { instance: self })),
             Some(false) => SatResult::Unsat,
-            None => panic!("Resource limits are not supported yet by satcoder (use cadical directly)"),
+            None => {
+                panic!("Resource limits are not supported yet by satcoder (use cadical directly)")
+            }
         }
     }
 }
 
 impl SatSolverWithCore for Cadical {
-    type Lit = CdcLit;
+    type Lit = Lit;
 
     fn solve_with_assumptions<'a>(
         &'a mut self,
-        assumptions: impl IntoIterator<Item = Bool<Self::Lit>>,
+        assumptions: impl IntoIterator<Item = Bool>,
     ) -> SatResultWithCore<'a, Self::Lit> {
-       let assumptions = assumptions.into_iter().filter_map(|l| match l {
-            Bool::Const(true) => None,
-            Bool::Const(false) => None,
-            Bool::Lit(l) => Some(l),
-        }).collect::<Vec<_>>();
+        let assumptions = assumptions
+            .into_iter()
+            .filter_map(|l| match l {
+                Bool::Const(true) => None,
+                Bool::Const(false) => panic!(),
+                Bool::Lit(l) => Some(l),
+            })
+            .collect::<Vec<_>>();
 
-        match self.cadical.solve_with(assumptions.iter().map(|&CdcLit(l)| l)) {
+        match self.cadical.solve_with(assumptions.iter().map(|&Lit(l)| l)) {
             Some(true) => SatResultWithCore::Sat(Box::new(CadicalModel { instance: self })),
             Some(false) => {
-                let core = assumptions.into_iter().filter(|l| self.cadical.failed(l.0)).collect::<Vec<_>>();
+                let core = assumptions
+                    .into_iter()
+                    .filter(|l| self.cadical.failed(l.0))
+                    .collect::<Vec<_>>();
                 SatResultWithCore::Unsat(core.into_boxed_slice())
-            },
-            None => panic!("Resource limits are not supported yet by satcoder (use cadical directly)"),
+            }
+            None => {
+                panic!("Resource limits are not supported yet by satcoder (use cadical directly)")
+            }
         }
     }
 }
 
 struct CadicalModel<'a> {
-    instance :&'a Cadical,
+    instance: &'a Cadical,
 }
 
 impl<'a> SatModel for CadicalModel<'a> {
-    type L = CdcLit;
+    type Lit = Lit;
 
-    fn lit_value(&self, l: &Self::L) -> bool {
+    fn lit_value(&self, l: &Self::Lit) -> bool {
         self.instance.cadical.value(l.0).unwrap()
     }
 }

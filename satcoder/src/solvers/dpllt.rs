@@ -36,9 +36,9 @@ struct Model<'a, T> {
 }
 
 impl<'a, T: dpllt::Theory> SatModel for Model<'a, T> {
-    type L = SLit;
+    type Lit = SLit;
 
-    fn lit_value(&self, l: &Self::L) -> bool {
+    fn lit_value(&self, l: &Self::Lit) -> bool {
         self.solver.value(*l)
     }
 }
