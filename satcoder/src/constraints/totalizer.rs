@@ -113,7 +113,8 @@ fn add_totalizer_constraints<L: Lit, S: SatInstance<L>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use minisat::*;
+    use crate::solvers::cadical::*;
+    use crate::symbolic::*;
 
     #[test]
     fn one_of_each() {
@@ -124,7 +125,7 @@ mod tests {
         let totalizer2 = Totalizer::count(&mut solver, [!x1, !x2].iter().cloned(), 2);
         solver.add_clause([!totalizer1.rhs()[1]].iter().cloned());
         solver.add_clause([!totalizer2.rhs()[1]].iter().cloned());
-        let model = solver.solve().ok().unwrap();
+        let model = solver.solve().as_result().ok().unwrap();
         println!("value x1 {:?} = {:?}", x1, model.value(&x1));
         println!("value x2 {:?} = {:?}", x2, model.value(&x2));
         assert!(
@@ -153,7 +154,7 @@ mod tests {
         solver.add_clause([!totalizer.rhs()[3]].iter().cloned()); // there is not 3 bs
 
         // At least one is true
-        let model = solver.solve().ok().unwrap();
+        let model = solver.solve().as_result().ok().unwrap();
         println!(
             "values {:?}",
             xs.iter()
@@ -176,7 +177,7 @@ mod tests {
                         let mut solver = Solver::new();
                         let xs = (0..num_vars).map(|_| solver.new_var()).collect::<Vec<_>>();
                         for a in 0..asserted {
-                            solver.add_clause(Some(xs[num_vars - 1 - a].into()));
+                            solver.add_clause(std::iter::once(xs[num_vars - 1 - a]));
                         }
 
                         let totalizer =
@@ -188,7 +189,7 @@ mod tests {
 
                         let should_succeed = asserted <= maximum;
                         if should_succeed {
-                            let model = solver.solve().ok().unwrap();
+                            let model = solver.solve().as_result().ok().unwrap();
                             let values = xs.iter().map(|v| model.value(v)).collect::<Vec<_>>();
                             println!("  values {:?}", values);
                             assert!(
@@ -196,7 +197,7 @@ mod tests {
                                     <= maximum
                             );
                         } else {
-                            assert!(solver.solve().is_err());
+                            assert!(solver.solve().as_result().is_err());
                         }
                     }
                 }

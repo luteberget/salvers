@@ -135,7 +135,8 @@ impl<L: Lit + core::fmt::Debug> RC2SoftClauses<L> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use minisat::*;
+    use crate::solvers::minisat::*;
+    use crate::symbolic::*;
 
     #[test]
     pub fn example0() {
@@ -165,7 +166,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .map(|(i, x)| {
-                    if model.value(*x) {
+                    if model.value(x) {
                         format!(" x{}", i)
                     } else {
                         format!("!x{}", i)
