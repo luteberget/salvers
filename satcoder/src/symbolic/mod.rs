@@ -14,6 +14,12 @@ impl<'m, L: Lit> SymbolicModel<L> for dyn SatModel<Lit = L> + 'm {
     }
 }
 
+impl<'m, L: Lit, T : SatModel<Lit = L> + 'm> SymbolicModel<L> for T {
+    fn value<'a, 'b, S: Symbolic<'a, L>>(&'b self, l: &'a S) -> S::T {
+        l.interpret(self)
+    }
+}
+
 pub trait Symbolic<'a, L: Lit> {
     type T;
     fn interpret<'b>(&'a self, m: &'b dyn SatModel<Lit = L>) -> Self::T;
