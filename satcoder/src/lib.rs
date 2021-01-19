@@ -9,4 +9,6 @@ pub mod solvers;
 pub mod symbolic;
 pub mod traits;
 
+pub mod dimacsoutput;
+
 pub use traits::*;
