@@ -1,6 +1,8 @@
 mod finset;
+mod unary;
 mod model_eq;
 pub use finset::*;
+pub use unary::*;
 pub use model_eq::*;
 
 use crate::{Bool, Lit, SatModel};
