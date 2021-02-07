@@ -3,13 +3,50 @@ use crate::traits::*;
 use std::collections::HashMap;
 use std::hash::Hash;
 
+pub struct RelaxableCardinalityConstraints<L: Lit + Hash + PartialEq + Eq> {
+    sums :HashMap<Bool<L>, (Totalizer<L>, u32)>
+}
+
+impl<L : Lit> RelaxableCardinalityConstraints<L>  {
+    pub fn new() -> Self {
+        RelaxableCardinalityConstraints { sums: HashMap::new() }
+    }
+
+    pub fn assumptions<'a>(&'a self) -> impl IntoIterator<Item = Bool<L>> + 'a {
+        self.sums.keys().copied()
+    }
+
+    pub fn increase_sum_bound(&mut self, s: &mut impl SatInstance<L>, x :Bool<L>) {
+        if let Some((mut tot, bound)) = self.sums.remove(&x) {
+            tot.increase_bound(s, bound + 1);
+            self.add_soft_card(tot, bound + 1);
+        } else {
+            panic!();
+        }
+    }
+
+    pub fn relax_set(&mut self, s :&mut impl SatInstance<L>, xs :impl IntoIterator<Item = L>) {
+        let relax = xs.into_iter().map(Bool::Lit).map(|l| !l);
+        let count = Totalizer::count(s, relax, 1);
+        self.add_soft_card(count, 1); /* note that this does nothing if relax.len() == 1. */
+    }
+
+    /// Add a soft cardinality constraint.
+    fn add_soft_card(&mut self, tot: Totalizer<L>, bound: u32) {
+        if (bound as usize) < tot.rhs().len() {
+            self.sums.insert(!tot.rhs()[bound as usize], (tot, bound));
+        } // if not, the clauses are a lost cause, their full cost is already added.
+    }
+}
+
+
 /// Soft clauses implemented by
 /// relaxable cardinality constraints.
 pub struct RC2SoftClauses<L: Lit + Hash + PartialEq + Eq> {
     cost: u32,
     maxcost: u32,
     selectors: HashMap<Bool<L>, ()>,
-    sums: HashMap<Bool<L>, (Totalizer<L>, u32)>,
+    cardinality: RelaxableCardinalityConstraints<L>, 
 }
 
 impl<L: Lit + core::fmt::Debug> RC2SoftClauses<L> {
@@ -19,7 +56,7 @@ impl<L: Lit + core::fmt::Debug> RC2SoftClauses<L> {
             cost: 0,
             maxcost: 0,
             selectors: HashMap::new(),
-            sums: HashMap::new(),
+            cardinality: RelaxableCardinalityConstraints::new(),
         }
     }
 
@@ -53,11 +90,13 @@ impl<L: Lit + core::fmt::Debug> RC2SoftClauses<L> {
         sat: &'a mut S,
     ) -> Option<(u32, Box<dyn SatModel<Lit = L> + 'a>)> {
         loop {
-            let mut assumptions = self.selectors.keys().chain(self.sums.keys()).cloned();
+            let mut assumptions = self.selectors.keys().copied()
+                .chain(self.cardinality.assumptions());
             let result = {
                 /*let _p = hprof::enter("sat solve"); */
                 sat.solve_with_assumptions(&mut assumptions)
             };
+            drop(assumptions);
 
             match result {
                 SatResultWithCore::Sat(ref _model) => {
@@ -77,7 +116,8 @@ impl<L: Lit + core::fmt::Debug> RC2SoftClauses<L> {
                     // saving) and therefore find the same model without search.
 
                     drop(result);
-                    let mut assumptions = self.selectors.keys().chain(self.sums.keys()).cloned();
+                    let mut assumptions = self.selectors.keys().copied()
+                        .chain(self.cardinality.assumptions());
                     if let SatResultWithCore::Sat(model) =
                         sat.solve_with_assumptions(&mut assumptions)
                     {
@@ -102,34 +142,24 @@ impl<L: Lit + core::fmt::Debug> RC2SoftClauses<L> {
                         .iter()
                         .copied()
                         .map(Bool::Lit)
-                        .all(|l| self.selectors.contains_key(&l) || self.sums.contains_key(&l)));
+                        .all(|l| self.selectors.contains_key(&l) || self.cardinality.sums.contains_key(&l)));
 
                     if core.len() == 1 {
                         sat.add_clause([!core[0]].iter().cloned());
                     }
 
                     for l in core.iter().copied().map(Bool::Lit) {
-                        self.selectors.remove(&l);
-                        if let Some((mut tot, bound)) = self.sums.remove(&l) {
-                            tot.increase_bound(sat, bound + 1);
-                            self.add_soft_card(tot, bound + 1);
+                        if self.selectors.remove(&l).is_none() {
+                            self.cardinality.increase_sum_bound(sat, l);
                         }
                     }
 
-                    let relax = core.iter().copied().map(Bool::Lit).map(|l| !l);
-                    let count = Totalizer::count(sat, relax, 1);
-                    self.add_soft_card(count, 1); /* note that this does nothing if relax.len() == 1. */
+                    self.cardinality.relax_set(sat, core);
                 }
             };
         }
     }
 
-    /// Add a soft cardinality constraint.
-    fn add_soft_card(&mut self, tot: Totalizer<L>, bound: u32) {
-        if (bound as usize) < tot.rhs().len() {
-            self.sums.insert(!tot.rhs()[bound as usize], (tot, bound));
-        } // if not, the clauses are a lost cause, their full cost is already added.
-    }
 }
 
 #[cfg(test)]
