@@ -33,9 +33,24 @@ impl crate::Lit for Lit {
     }
 }
 
+
+
 pub struct Cadical {
     pub cadical: ::cadical::Solver,
     next_var: u32,
+}
+
+impl std::fmt::Debug for Cadical {
+    
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Cadical instance ({}) {{ variables: {}, clauses: {} }}",
+            self.cadical.signature(),
+            self.cadical.num_variables(),
+            self.cadical.num_clauses()
+        )
+    }
 }
 
 impl Cadical {

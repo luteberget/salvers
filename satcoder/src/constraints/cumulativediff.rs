@@ -229,7 +229,7 @@ mod tests {
                 let mut constraint =
                     CumulativeDiff::new(&mut solver, updowns.iter().copied(), width);
                 loop {
-                    let longest_run = if width == 0 { 0 } else { 2 * width };
+                    let longest_run = 2*width;
                     let should_be_sat = n_forced <= longest_run as usize;
 
                     println!("solving {:?}", solver);

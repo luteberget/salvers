@@ -1,9 +1,11 @@
 mod finset;
 mod model_eq;
 mod unary;
+mod binary;
 pub use finset::*;
 pub use model_eq::*;
 pub use unary::*;
+pub use binary::*;
 
 use crate::{Bool, Lit, SatModel};
 pub trait SymbolicModel<L: Lit> {
