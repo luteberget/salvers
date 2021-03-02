@@ -4,19 +4,21 @@ use std::collections::HashMap;
 use std::hash::Hash;
 
 pub struct RelaxableCardinalityConstraints<L: Lit + Hash + PartialEq + Eq> {
-    sums :HashMap<Bool<L>, (Totalizer<L>, u32)>
+    sums: HashMap<Bool<L>, (Totalizer<L>, u32)>,
 }
 
-impl<L : Lit> RelaxableCardinalityConstraints<L>  {
+impl<L: Lit> RelaxableCardinalityConstraints<L> {
     pub fn new() -> Self {
-        RelaxableCardinalityConstraints { sums: HashMap::new() }
+        RelaxableCardinalityConstraints {
+            sums: HashMap::new(),
+        }
     }
 
     pub fn assumptions<'a>(&'a self) -> impl IntoIterator<Item = Bool<L>> + 'a {
         self.sums.keys().copied()
     }
 
-    pub fn increase_sum_bound(&mut self, s: &mut impl SatInstance<L>, x :Bool<L>) {
+    pub fn increase_sum_bound(&mut self, s: &mut impl SatInstance<L>, x: Bool<L>) {
         if let Some((mut tot, bound)) = self.sums.remove(&x) {
             tot.increase_bound(s, bound + 1);
             self.add_soft_card(tot, bound + 1);
@@ -25,7 +27,7 @@ impl<L : Lit> RelaxableCardinalityConstraints<L>  {
         }
     }
 
-    pub fn relax_set(&mut self, s :&mut impl SatInstance<L>, xs :impl IntoIterator<Item = L>) {
+    pub fn relax_set(&mut self, s: &mut impl SatInstance<L>, xs: impl IntoIterator<Item = L>) {
         let relax = xs.into_iter().map(Bool::Lit).map(|l| !l);
         let count = Totalizer::count(s, relax, 1);
         self.add_soft_card(count, 1); /* note that this does nothing if relax.len() == 1. */
@@ -39,14 +41,13 @@ impl<L : Lit> RelaxableCardinalityConstraints<L>  {
     }
 }
 
-
 /// Soft clauses implemented by
 /// relaxable cardinality constraints.
 pub struct RC2SoftClauses<L: Lit + Hash + PartialEq + Eq> {
     cost: u32,
     maxcost: u32,
     selectors: HashMap<Bool<L>, ()>,
-    cardinality: RelaxableCardinalityConstraints<L>, 
+    cardinality: RelaxableCardinalityConstraints<L>,
 }
 
 impl<L: Lit + core::fmt::Debug> RC2SoftClauses<L> {
@@ -90,7 +91,10 @@ impl<L: Lit + core::fmt::Debug> RC2SoftClauses<L> {
         sat: &'a mut S,
     ) -> Option<(u32, Box<dyn SatModel<Lit = L> + 'a>)> {
         loop {
-            let mut assumptions = self.selectors.keys().copied()
+            let mut assumptions = self
+                .selectors
+                .keys()
+                .copied()
                 .chain(self.cardinality.assumptions());
             let result = {
                 /*let _p = hprof::enter("sat solve"); */
@@ -116,7 +120,10 @@ impl<L: Lit + core::fmt::Debug> RC2SoftClauses<L> {
                     // saving) and therefore find the same model without search.
 
                     drop(result);
-                    let mut assumptions = self.selectors.keys().copied()
+                    let mut assumptions = self
+                        .selectors
+                        .keys()
+                        .copied()
                         .chain(self.cardinality.assumptions());
                     if let SatResultWithCore::Sat(model) =
                         sat.solve_with_assumptions(&mut assumptions)
@@ -142,7 +149,8 @@ impl<L: Lit + core::fmt::Debug> RC2SoftClauses<L> {
                         .iter()
                         .copied()
                         .map(Bool::Lit)
-                        .all(|l| self.selectors.contains_key(&l) || self.cardinality.sums.contains_key(&l)));
+                        .all(|l| self.selectors.contains_key(&l)
+                            || self.cardinality.sums.contains_key(&l)));
 
                     if core.len() == 1 {
                         sat.add_clause([!core[0]].iter().cloned());
@@ -159,7 +167,6 @@ impl<L: Lit + core::fmt::Debug> RC2SoftClauses<L> {
             };
         }
     }
-
 }
 
 #[cfg(test)]

@@ -61,14 +61,17 @@ impl SatInstance<Lit> for Cadical {
     }
 
     fn add_clause<IL: Into<Bool>, I: IntoIterator<Item = IL>>(&mut self, clause: I) {
-            let lits = clause.into_iter().filter_map(|l| match l.into() {
+        let lits = clause
+            .into_iter()
+            .filter_map(|l| match l.into() {
                 Bool::Const(false) => None,
                 Bool::Const(true) => Some(Err(())),
                 Bool::Lit(Lit(x)) => Some(Ok(x)),
-            }).collect::<Result<Vec<_>,()>>();
-            if let Ok(lits) = lits {
-                self.cadical.add_clause(lits.iter().cloned());
-            }
+            })
+            .collect::<Result<Vec<_>, ()>>();
+        if let Ok(lits) = lits {
+            self.cadical.add_clause(lits.iter().cloned());
+        }
     }
 }
 

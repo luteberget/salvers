@@ -9,6 +9,11 @@ pub trait BooleanFormulas<L: Lit> {
     fn eq_literal(&mut self, a: Bool<L>, b: Bool<L>) -> Bool<L>;
 
     fn assert_at_most_one(&mut self, xs: impl IntoIterator<Item = impl Into<Bool<L>>>);
+    fn assert_at_most_one_or(
+        &mut self,
+        prefix: &[Bool<L>],
+        xs: impl IntoIterator<Item = impl Into<Bool<L>>>,
+    );
     fn assert_exactly_one(&mut self, xs: impl IntoIterator<Item = impl Into<Bool<L>>>);
     fn assert_parity(&mut self, xs: impl IntoIterator<Item = impl Into<Bool<L>>>, c: bool);
     fn assert_parity_or(
@@ -63,11 +68,23 @@ impl<L: Lit, S: SatInstance<L>> BooleanFormulas<L> for S {
     }
 
     fn assert_at_most_one(&mut self, xs: impl IntoIterator<Item = impl Into<Bool<L>>>) {
+        self.assert_at_most_one_or(&[], xs);
+    }
+
+    fn assert_at_most_one_or(
+        &mut self,
+        prefix: &[Bool<L>],
+        xs: impl IntoIterator<Item = impl Into<Bool<L>>>,
+    ) {
         let xs = xs.into_iter().map(|l| l.into()).collect::<Vec<_>>();
         if xs.len() <= 5 {
             for i in 0..xs.len() {
                 for j in (i + 1)..xs.len() {
-                    self.add_clause(once(!xs[i]).chain(once(!xs[j])));
+                    self.add_clause(
+                        once(!xs[i])
+                            .chain(once(!xs[j]))
+                            .chain(prefix.iter().copied()),
+                    );
                 }
             }
         } else {

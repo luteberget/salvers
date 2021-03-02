@@ -2,9 +2,9 @@ use crate::{constraints::*, *};
 use std::iter::once;
 
 #[derive(Debug, Clone)]
-pub struct Unary<L :Lit>(Vec<Bool<L>>);
+pub struct Unary<L: Lit>(Vec<Bool<L>>);
 
-impl<L:Lit> Unary<L> {
+impl<L: Lit> Unary<L> {
     pub fn unsafe_from_sorted(vec: Vec<Bool<L>>) -> Self {
         Unary(vec)
     }
@@ -29,7 +29,10 @@ impl<L:Lit> Unary<L> {
     }
 
     /// Unary representation of the number of true literals in set.
-    pub fn count<I: IntoIterator<Item = Bool<L>>>(solver: &mut impl SatInstance<L>, lits: I) -> Self {
+    pub fn count<I: IntoIterator<Item = Bool<L>>>(
+        solver: &mut impl SatInstance<L>,
+        lits: I,
+    ) -> Self {
         let lits = lits.into_iter().map(|x| Unary::from_bool(x)).collect();
         Unary::sum(solver, lits)
     }
@@ -151,7 +154,12 @@ impl<L:Lit> Unary<L> {
         Unary(Self::merge(sat, bound, self.0.clone(), other.0.clone()))
     }
 
-    fn merge(sat: &mut impl SatInstance<L>, bound: usize, mut a: Vec<Bool<L>>, mut b: Vec<Bool<L>>) -> Vec<Bool<L>> {
+    fn merge(
+        sat: &mut impl SatInstance<L>,
+        bound: usize,
+        mut a: Vec<Bool<L>>,
+        mut b: Vec<Bool<L>>,
+    ) -> Vec<Bool<L>> {
         use itertools::Itertools;
         if a.len() == 0 {
             b.truncate(bound);

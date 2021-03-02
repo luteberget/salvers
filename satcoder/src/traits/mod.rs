@@ -38,7 +38,7 @@ pub enum SatResult<'a, L: Lit> {
     Unsat,
 }
 
-impl <'a, L :Lit> SatResult<'a, L> {
+impl<'a, L: Lit> SatResult<'a, L> {
     pub fn as_result(self) -> Result<Box<dyn SatModel<Lit = L> + 'a>, ()> {
         match self {
             SatResult::Sat(m) => Ok(m),
@@ -52,7 +52,7 @@ pub enum SatResultWithCore<'a, L: Lit> {
     Unsat(Box<[L]>),
 }
 
-impl <'a, L :Lit> SatResultWithCore<'a, L> {
+impl<'a, L: Lit> SatResultWithCore<'a, L> {
     pub fn as_result(self) -> Result<Box<dyn SatModel<Lit = L> + 'a>, Box<[L]>> {
         match self {
             SatResultWithCore::Sat(m) => Ok(m),

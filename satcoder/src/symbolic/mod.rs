@@ -1,9 +1,9 @@
 mod finset;
-mod unary;
 mod model_eq;
+mod unary;
 pub use finset::*;
-pub use unary::*;
 pub use model_eq::*;
+pub use unary::*;
 
 use crate::{Bool, Lit, SatModel};
 pub trait SymbolicModel<L: Lit> {
@@ -16,7 +16,7 @@ impl<'m, L: Lit> SymbolicModel<L> for dyn SatModel<Lit = L> + 'm {
     }
 }
 
-impl<'m, L: Lit, T : SatModel<Lit = L> + 'm> SymbolicModel<L> for T {
+impl<'m, L: Lit, T: SatModel<Lit = L> + 'm> SymbolicModel<L> for T {
     fn value<'a, 'b, S: Symbolic<'a, L>>(&'b self, l: &'a S) -> S::T {
         l.interpret(self)
     }

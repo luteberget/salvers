@@ -1,5 +1,6 @@
 use crate::*;
 
+pub type Solver = dpllt::DplltSolver<dpllt::NullTheory>;
 use dpllt::Lit as SLit;
 use dpllt::Var as SVar;
 

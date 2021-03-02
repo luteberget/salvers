@@ -10,5 +10,6 @@ pub mod symbolic;
 pub mod traits;
 
 pub mod dimacsoutput;
+pub mod prelude;
 
 pub use traits::*;

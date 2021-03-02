@@ -26,12 +26,15 @@ impl SatInstance<Lit> for ::minisat::Solver {
     }
 
     fn add_clause<IL: Into<Bool>, I: IntoIterator<Item = IL>>(&mut self, clause: I) {
-        if let Ok(lits) = clause.into_iter().filter_map(|i| match i.into() {
+        if let Ok(lits) = clause
+            .into_iter()
+            .filter_map(|i| match i.into() {
                 Bool::Lit(l) => Some(Ok(l)),
                 Bool::Const(false) => None,
                 Bool::Const(true) => Some(Err(())),
-        }).collect::<Result<Vec<Lit>, ()>>() {
-
+            })
+            .collect::<Result<Vec<Lit>, ()>>()
+        {
             ::minisat::Solver::add_clause(self, lits);
         }
     }
@@ -54,7 +57,7 @@ impl SatSolverWithCore for ::minisat::Solver {
         ) {
             Ok(m) => SatResultWithCore::Sat(Box::new(m)),
             Err(c) => {
-                // MiniSAT gives a conflict clause, we want an 
+                // MiniSAT gives a conflict clause, we want an
                 // unsat core, so invert each literal.
                 let vec = c.iter().map(|c| !c).collect::<Vec<_>>();
 

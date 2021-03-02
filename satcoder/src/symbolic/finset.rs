@@ -1,9 +1,12 @@
 use crate::{constraints::*, symbolic::*, *};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FinSet<L: Lit, T>(Vec<(Bool<L>, T)>);
 
 impl<L: Lit, T> FinSet<L, T> {
+    pub fn from_vec_unsafe(xs: Vec<(Bool<L>, T)>) -> Self {
+        Self(xs)
+    }
     pub fn new(solver: &mut impl SatInstance<L>, mut xs: Vec<T>) -> Self {
         if xs.len() == 0 {
             panic!("Symbolic value cannot be initialized from empty list.");
