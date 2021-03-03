@@ -1,4 +1,4 @@
-use crate::{constraints::*, *};
+use crate::{constraints::*, symbolic::*, *};
 use std::iter::once;
 
 #[derive(Debug,Clone)]
@@ -182,8 +182,8 @@ impl<L:Lit + 'static> Binary<L> {
         Binary::add_bits(solver, out)
     }
     
-    fn assert_lt(solver: &mut impl SatInstance<L>,
-                      prefix: Vec<Bool<L>>,
+    pub fn assert_lt(solver: &mut impl SatInstance<L>,
+                      //prefix: Vec<Bool<L>>,
                       a: &Binary<L>,
                       b: &Binary<L>) {
         use std::iter::repeat;
@@ -203,7 +203,70 @@ impl<L:Lit + 'static> Binary<L> {
             .collect::<Vec<_>>();
         b_bits.reverse();
 
-        todo!()
+        let lt = lt_literal(solver, &a_bits, &b_bits);
+        solver.add_clause(vec![lt]);
+    }
+}
+
+fn lt_literal<L:Lit>(solver :&mut impl SatInstance<L>, //prefix :Vec<Bool<L>>, 
+                         a :&[Bool<L>], b :&[Bool<L>]) -> Bool<L> {
+    assert!(a.len() == b.len());
+    let n = a.len();
+
+    if n == 1 {
+        return solver.and_literal(vec![!a[0], b[0]]);
+    }
+
+    let rest = lt_literal(solver, &a[1..], &b[1..]);
+    let lt_lit = solver.new_var();
+
+    solver.add_clause(vec![!lt_lit, b[0], rest]);
+    solver.add_clause(vec![!lt_lit, !a[0], rest]);
+    solver.add_clause(vec![!lt_lit, !a[0], b[0]]);
+
+    return lt_lit;
+}
+
+impl<L :Lit> Symbolic<'_, L> for Binary<L> {
+    type T = usize;
+
+    fn interpret(&self, m :&dyn SatModel<Lit =L>) -> Self::T {
+        self.0
+            .iter()
+            .enumerate()
+            .map(|(i, x)| if m.value(x) {
+                (2 as usize).pow(i as u32)
+            } else {
+                0
+            })
+            .sum()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    pub fn test_binary_lt_const() {
+        let mut solver = crate::solvers::minisat::Solver::new();
+        let bin = Binary::new(&mut solver, 1000);
+        Binary::assert_lt(&mut solver, &Binary::constant(500), &bin);
+        Binary::assert_lt(&mut solver, &bin, &Binary::constant(525));
+        let model = solver.solve().unwrap();
+
+        let value = model.value(&bin);
+        println!("value = {:?}", value);
+        assert!(value >= 500 && value <= 525);
+    }
+
+    #[test]
+    pub fn test_binary_unsat() {
+        let mut solver = crate::solvers::minisat::Solver::new();
+        let bin = Binary::new(&mut solver, 1000);
+        Binary::assert_lt(&mut solver, &Binary::constant(500), &bin);
+        Binary::assert_lt(&mut solver, &bin, &Binary::constant(499));
+        assert!(solver.solve().is_err());
     }
 }
 
