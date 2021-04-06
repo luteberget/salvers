@@ -11,7 +11,7 @@ default = ["solver_minisat", "solver_cadical"]
 
 [dependencies]
 cadical = { version = "0.1", optional = true }
-minisat = { git = "https://github.com/luteberget/minisat-rs.git", rev = "e564f1177f0f8290d68e2346c7d4fa931f50da04" }
+minisat = { git = "https://github.com/luteberget/minisat-rs.git", rev = "e564f1177f0f8290d68e2346c7d4fa931f50da04", optional = true }
 dpllt = { path = "../dpllt" }
 itertools = { version = "0.10" }
 
