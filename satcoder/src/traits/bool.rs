@@ -23,6 +23,13 @@ impl<L: Lit> Bool<L> {
     pub fn from_lit(l: L) -> Bool<L> {
         Bool::Lit(l)
     }
+
+    pub fn lit(&self) -> Option<L> {
+        match self {
+            Bool::Lit(l) => Some(*l),
+            _ => None,
+        }
+    }
 }
 
 impl<L: Lit> std::ops::Not for Bool<L> {
