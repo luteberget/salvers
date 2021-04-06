@@ -10,8 +10,8 @@ solver_cadical = ["cadical"]
 default = ["solver_minisat", "solver_cadical"]
 
 [dependencies]
-minisat = { path = "../../minisat-rs", optional = true }
 cadical = { version = "0.1", optional = true }
+minisat = { git = "https://github.com/luteberget/minisat.git", rev = "e564f1177f0f8290d68e2346c7d4fa931f50da04" }
 dpllt = { path = "../dpllt" }
 itertools = { version = "0.10" }
 
