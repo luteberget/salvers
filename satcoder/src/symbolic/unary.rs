@@ -1,4 +1,4 @@
-use crate::{constraints::*, *};
+use crate::{constraints::*, symbolic::*, *};
 use std::iter::once;
 
 #[derive(Debug, Clone)]
@@ -313,3 +313,16 @@ impl<L: Lit> Unary<L> {
 //            .unwrap_or(self.0.len())
 //    }
 //}
+
+impl<L :Lit> Symbolic<'_, L> for Unary<L> {
+    type T = usize;
+
+    fn interpret(&self, m :&dyn SatModel<Lit =L>) -> Self::T {
+       self.0
+           .iter()
+           .enumerate()
+           .find(|(_i, x)| !m.value(*x))
+           .map(|(v, _)| v)
+           .unwrap_or(self.0.len())
+    }
+}
