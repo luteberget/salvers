@@ -9,6 +9,7 @@ pub trait BooleanFormulas<L: Lit> {
     fn eq_literal(&mut self, a: Bool<L>, b: Bool<L>) -> Bool<L>;
 
     fn assert_at_most_one(&mut self, xs: impl IntoIterator<Item = impl Into<Bool<L>>>);
+    fn assert_at_most_two(&mut self, xs: impl IntoIterator<Item = impl Into<Bool<L>>>);
     fn assert_at_most_one_or(
         &mut self,
         prefix: &[Bool<L>],
@@ -69,6 +70,25 @@ impl<L: Lit, S: SatInstance<L>> BooleanFormulas<L> for S {
 
     fn assert_at_most_one(&mut self, xs: impl IntoIterator<Item = impl Into<Bool<L>>>) {
         self.assert_at_most_one_or(&[], xs);
+    }
+
+    fn assert_at_most_two(&mut self, xs :impl IntoIterator<Item = impl Into<Bool<L>>>) {
+        let xs = xs.into_iter().map(|l| l.into()).collect::<Vec<_>>();
+        if xs.len() <= 5 {
+            for i in 0..xs.len() {
+                for j in (i+1)..xs.len() {
+                    for k in (j+1)..xs.len() {
+                        self.add_clause(vec![!xs[i],!xs[j],!xs[k]]);
+                    }
+                }
+            }
+        } else {
+            let x1 = self.new_var();
+            let x2 = self.new_var();
+            let k = xs.len() / 2;
+            self.assert_at_most_two(once(x1).chain(once(x2)).chain(xs.iter().take(k).cloned()));
+            self.assert_at_most_two(once(!x1).chain(once(!x2)).chain(xs.iter().skip(k).cloned()));
+        }
     }
 
     fn assert_at_most_one_or(
