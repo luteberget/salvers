@@ -4,6 +4,7 @@ use crate::*;
 
 pub type Bool = crate::traits::Bool<Lit>;
 pub use self::Cadical as Solver;
+pub use cadical::*;
 
 #[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct Lit(i32);
