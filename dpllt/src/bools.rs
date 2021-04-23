@@ -2,7 +2,7 @@
 // Variables and literals
 // ------
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Var(pub i32);
 pub const VAR_UNDEF: Var = Var(-1);
 

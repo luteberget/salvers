@@ -17,7 +17,5 @@ hprof = "0.1"
 
 
 [features]
-default = ["trace", "searchtrace", "named_vars"]
+default = ["trace"]
 trace = []
-searchtrace = []
-named_vars = []
