@@ -1,12 +1,12 @@
-use crate::*;
-
+use crate::{SatInstance, SatSolver, SatSolverWithCore, SatResult, SatResultWithCore, Bool, SatModel};
 pub type Solver = dpllt::DplltSolver<dpllt::NullTheory>;
+pub use dpllt::*;
 use dpllt::Lit as SLit;
 use dpllt::Var as SVar;
 
-impl Var for SVar {}
+impl crate::Var for SVar {}
 
-impl Lit for SLit {
+impl crate::Lit for SLit {
     type Var = SVar;
 
     fn into_var(self) -> (Self::Var, bool) {
