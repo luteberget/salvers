@@ -1029,7 +1029,7 @@ impl<Th: Theory> DplltSolver<Th> {
             self.trail_lim.truncate(level as usize);
             trace!("traillen {} -> {}", l2, self.trail_lim.len());
 
-            self.write_trace(TraceEntry::Pop(l2-l1));
+            self.write_trace(TraceEntry::Pop(l1-l2));
             self.theory.backtrack(level);
         }
     }
