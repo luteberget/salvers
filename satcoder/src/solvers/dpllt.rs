@@ -24,11 +24,15 @@ impl<T: dpllt::Theory> SatInstance<SLit> for dpllt::DplltSolver<T> {
     }
 
     fn add_clause<IL: Into<Bool<SLit>>, I: IntoIterator<Item = IL>>(&mut self, clause: I) {
-        self.add_clause(clause.into_iter().filter_map(|l| match l.into() {
-            Bool::Const(true) => None,
-            Bool::Const(false) => panic!(),
-            Bool::Lit(l) => Some(l),
-        }));
+        let mut s_clause :Vec<SLit> = Vec::new();
+        for l in clause.into_iter() {
+            match l.into() {
+                Bool::Const(true) => { return; },
+                Bool::Const(false) => {},
+                Bool::Lit(l) => { s_clause.push(l); },
+            }
+        }
+        self.add_clause(s_clause);
     }
 }
 
