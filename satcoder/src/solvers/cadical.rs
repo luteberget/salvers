@@ -145,6 +145,6 @@ impl<'a> SatModel for CadicalModel<'a> {
     type Lit = Lit;
 
     fn lit_value(&self, l: &Self::Lit) -> bool {
-        self.instance.cadical.value(l.0).unwrap()
+        self.instance.cadical.value(l.0).unwrap_or(false)
     }
 }

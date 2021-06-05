@@ -40,6 +40,10 @@ struct Model<'a, T> {
     solver: &'a dpllt::DplltSolver<T>,
 }
 
+pub fn unchecked_model<'a, T :dpllt::Theory>(solver :&'a dpllt::DplltSolver<T>) -> Box<dyn SatModel<Lit=SLit> + 'a> {
+    Box::new(Model { solver })
+}
+
 impl<'a, T: dpllt::Theory> SatModel for Model<'a, T> {
     type Lit = SLit;
 
