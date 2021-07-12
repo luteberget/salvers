@@ -1914,7 +1914,7 @@ impl<Th: Theory> DplltSolver<Th> {
         }
     }
 
-    fn search(&mut self, nof_conflicts: i32) -> LBool {
+    fn search(&mut self, nof_conflicts: i32, interrupt :&mut impl FnMut()->bool) -> Result<LBool,()> {
         #[cfg(feature = "profiler")]
         let _p = hprof::enter("sat search");
         
@@ -1936,7 +1936,7 @@ impl<Th: Theory> DplltSolver<Th> {
                 self.stats.conflicts += 1;
                 conflict_c += 1;
                 if self.trail_lim.len() == 0 {
-                    return LBOOL_FALSE;
+                    return Ok(LBOOL_FALSE);
                 }
 
                 learnt_clause.clear();
@@ -2013,16 +2013,21 @@ impl<Th: Theory> DplltSolver<Th> {
                 // no conflict found
                 trace!("no conflict found");
 
-                if nof_conflicts >= 0 && conflict_c >= nof_conflicts || !self.within_budget() {
+                if nof_conflicts >= 0 && conflict_c >= nof_conflicts {
                     // budget cancel
                     trace!("budget cancel");
                     self.cancel_until(0);
-                    return LBOOL_UNDEF;
+                    return Ok(LBOOL_UNDEF);
+                }
+
+                if interrupt() || !self.within_budget() {
+                    self.cancel_until(0);
+                    return Err(());
                 }
 
                 // simplify problem clauses
                 if self.trail_lim.len() == 0 && !self.simplify() {
-                    return LBOOL_FALSE;
+                    return Ok(LBOOL_FALSE);
                 }
 
                 // reduce the set of learnt clauses
@@ -2052,7 +2057,7 @@ impl<Th: Theory> DplltSolver<Th> {
                         self.theory.new_decision_level();
                     } else if self.lit_value(p) == LBOOL_FALSE {
                         self.analyze_final(p.inverse());
-                        return LBOOL_FALSE;
+                        return Ok(LBOOL_FALSE);
                     } else {
                         next = p;
                         break;
@@ -2073,7 +2078,7 @@ impl<Th: Theory> DplltSolver<Th> {
                             continue;
                         }
                         // model found and theory consistent
-                        return LBOOL_TRUE;
+                        return Ok(LBOOL_TRUE);
                     }
                 }
 
@@ -2122,6 +2127,10 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     pub fn solve(&mut self) -> LBool {
+        self.solve_interrupt(&mut || false)
+    }
+
+    pub fn solve_interrupt(&mut self, interrupt :&mut impl FnMut()->bool) -> LBool {
         #[cfg(feature = "profiler")]
         let _p = hprof::enter("sat solve");
         debug!("-> SOLVE");
@@ -2154,9 +2163,14 @@ impl<Th: Theory> DplltSolver<Th> {
                 self.params.restart_inc.powf(curr_restarts as f64)
             };
 
-            status = self.search((rest_base * self.params.restart_first as f64) as i32);
-            if !self.within_budget() {
-                break;
+            match self.search((rest_base * self.params.restart_first as f64) as i32, interrupt) {
+                Ok(s) => { 
+                    status = s;
+                },
+                Err(()) => { 
+                    status = LBOOL_UNDEF;
+                    break;
+                 }
             }
             curr_restarts += 1;
         }
