@@ -1012,7 +1012,10 @@ impl<Th: Theory> DplltSolver<Th> {
         mut conflict_clause: ClauseHeaderOffset,
         out_learnt: &mut Vec<Lit>,
     ) -> i32 {
+
+        #[cfg(feature = "profiler")]
         let _p = hprof::enter("analyze");
+
         trace!("--> ANALYZE cref{}", conflict_clause);
         let mut path_c = 0;
         let mut p = LIT_UNDEF;
@@ -1257,7 +1260,9 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     fn propagate_bool(&mut self) -> ClauseHeaderOffset {
+        #[cfg(feature = "profiler")]
         let _p = hprof::enter("propagate_bool");
+
         trace!("-> PROPAGATE");
         let mut conflict_clause = CLAUSE_NONE;
         let mut num_props = 0;
@@ -1628,7 +1633,9 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     fn simplify(&mut self) -> bool {
+        #[cfg(feature = "profiler")]
         let _p = hprof::enter("sat simplify");
+
         assert!(self.trail_lim.len() == 0);
         debug!(
             "simplify called at decisionlevel=0 with trail length={}",
@@ -1712,7 +1719,9 @@ impl<Th: Theory> DplltSolver<Th> {
 
     fn propagate(&mut self) -> ClauseHeaderOffset {
         //eprintln!("propagate with v={} c={} l={}", self.num_vars(), self.num_clauses(), self.num_learnts());
+        #[cfg(feature = "profiler")]
         let _p = hprof::enter("propagate");
+
         loop {
             self.theory_final_checked = false;
             let bool_prop = self.propagate_bool();
@@ -1906,7 +1915,9 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     fn search(&mut self, nof_conflicts: i32) -> LBool {
+        #[cfg(feature = "profiler")]
         let _p = hprof::enter("sat search");
+        
         debug!("-> SEARCH(nof_conflicts={})", nof_conflicts);
         assert!(self.ok);
         let mut conflict_c = 0;
@@ -1948,6 +1959,8 @@ impl<Th: Theory> DplltSolver<Th> {
                 }
 
                 {
+
+        #[cfg(feature = "profiler")]
         let _p = hprof::enter("sat backtrack");
 
                 self.cancel_until(backtrack_level);
@@ -1992,6 +2005,8 @@ impl<Th: Theory> DplltSolver<Th> {
                 }
                 }
             } else {
+
+        #[cfg(feature = "profiler")]
                 let _p = hprof::enter("sat decide");
 
             //println!("search loop iter: no conflict");
@@ -2019,6 +2034,8 @@ impl<Th: Theory> DplltSolver<Th> {
                 trace!("max learnts: {}", self.max_learnts);
                 if self.learnts.len() as f64 - self.trail.len() as f64 >= self.max_learnts {
                     //eprintln!("reduce_db");
+                    //
+        #[cfg(feature = "profiler")]
                     let _p = hprof::enter("sat reduce db");
                     self.reduce_db();
                 }
@@ -2105,6 +2122,7 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     pub fn solve(&mut self) -> LBool {
+        #[cfg(feature = "profiler")]
         let _p = hprof::enter("sat solve");
         debug!("-> SOLVE");
         self.model.clear();
@@ -2162,6 +2180,7 @@ impl<Th: Theory> DplltSolver<Th> {
         status
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn stats_info(&self, solve_start: cpu_time::ProcessTime) {
         let duration = cpu_time::ProcessTime::now()
             .duration_since(solve_start)

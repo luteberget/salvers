@@ -13,9 +13,9 @@ log = { version = "0.4", features = ["release_max_level_debug"] }
 cpu-time = "1.0"
 simple_logger = "1.6"
 sattrait = { path = "../sattrait" }
-hprof = "0.1"
-
+hprof = { version = "0.1", optional = true }
 
 [features]
 default = ["trace"]
 trace = []
+profiler = ["hprof"]
