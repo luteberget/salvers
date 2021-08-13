@@ -49,6 +49,10 @@ impl<'a, L: Lit, FT: 'a> Symbolic<'a, L> for FinSet<L, FT> {
                 return x;
             }
         }
-        unreachable!("FinSet encoding is inconsistent -- could not determine value from model.")
+
+        //unreachable!("FinSet encoding is inconsistent -- could not determine value from model.")
+        // Cadical returns undecided sometimes, will return the first value here as a temporary
+        // workaround.
+        return &self.0[0].1;
     }
 }
