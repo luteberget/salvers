@@ -9,6 +9,10 @@ impl<L: Lit> Unary<L> {
         Unary(vec)
     }
 
+    pub fn digits(&self) -> &[Bool<L>] {
+        &self.0
+    }
+
     /// Create a new non-negative integer using a unary encoding.
     pub fn new(solver: &mut impl SatInstance<L>, size: usize) -> Self {
         let lits = (0..size).map(|_| solver.new_var()).collect::<Vec<_>>();
@@ -44,6 +48,20 @@ impl<L: Lit> Unary<L> {
                 .chain(self.0.iter().cloned())
                 .collect(),
         )
+    }
+
+    /// Add a new literal to the end of the unary number. Return the literal.
+    pub fn extend(&mut self, solver :&mut impl SatInstance<L>) -> Bool<L> {
+        let new_lit = solver.new_var();
+        self.extend_lit(solver, new_lit);
+        new_lit
+    }
+
+    // Add the given new literal `x_i` to the end of the unary number, and add the corresponding constraint `x_i => x_{i-1}`.
+    pub fn extend_lit(&mut self, solver: &mut impl SatInstance<L>, l: Bool<L>) {
+        let prev_lit = self.0.last().copied().unwrap_or_else(|| true.into());
+        self.0.push(l);
+        solver.add_clause(std::iter::once(!l).chain(std::iter::once(prev_lit)));
     }
 
     /// The predecessor of the given number, except if the number is zero in
@@ -314,15 +332,15 @@ impl<L: Lit> Unary<L> {
 //    }
 //}
 
-impl<L :Lit> Symbolic<'_, L> for Unary<L> {
+impl<L: Lit> Symbolic<'_, L> for Unary<L> {
     type T = usize;
 
-    fn interpret(&self, m :&dyn SatModel<Lit =L>) -> Self::T {
-       self.0
-           .iter()
-           .enumerate()
-           .find(|(_i, x)| !m.value(*x))
-           .map(|(v, _)| v)
-           .unwrap_or(self.0.len())
+    fn interpret(&self, m: &dyn SatModel<Lit = L>) -> Self::T {
+        self.0
+            .iter()
+            .enumerate()
+            .find(|(_i, x)| !m.value(*x))
+            .map(|(v, _)| v)
+            .unwrap_or(self.0.len())
     }
 }

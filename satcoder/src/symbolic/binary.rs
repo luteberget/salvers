@@ -125,6 +125,7 @@ impl<L:Lit + 'static> Binary<L> {
         (v, c)
     }
 
+    #[allow(clippy::if_same_then_else)]
     fn at_least_two(solver: &mut impl SatInstance<L>, a: Bool<L>, b: Bool<L>, c: Bool<L>) -> Bool<L> {
         if a == true.into() {
             solver.or_literal(once(b).chain(once(c)))

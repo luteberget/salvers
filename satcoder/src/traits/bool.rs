@@ -30,6 +30,13 @@ impl<L: Lit> Bool<L> {
             _ => None,
         }
     }
+
+    pub fn constant(&self) -> Option<bool> {
+        match self {
+            Bool::Const(t) => Some(*t),
+            _ => None,
+        }
+    }
 }
 
 impl<L: Lit> std::ops::Not for Bool<L> {
