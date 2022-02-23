@@ -180,6 +180,7 @@ impl<L: Lit> EqTotalizer<L> {
         let old_left_bound = self.nodes[node].left_constraints;
         let old_right_bound = self.nodes[node].right_constraints;
         let old_bound = self.nodes[node].this_constraints;
+
         let new_left_bound = self.nodes[left_idx].number.bound();
         let new_right_bound = self.nodes[right_idx].number.bound();
 
@@ -189,7 +190,7 @@ impl<L: Lit> EqTotalizer<L> {
             for j in 0..=new_right_bound {
                 let k = i + j;
 
-                if k > node_bound {
+                if k > node_bound - 1 {
                     continue;
                 }
 
@@ -208,11 +209,37 @@ impl<L: Lit> EqTotalizer<L> {
                     self.nodes[node].number.bound()
                 );
 
-                println!("left gte i{} = {:?}", i, self.nodes[left_idx].number.gte_const(i as isize).constant());
-                println!("left lte i{} = {:?}", i, self.nodes[left_idx].number.lte_const(i as isize).constant());
-                println!("rhgt gte j{} = {:?}", j,self.nodes[right_idx].number.gte_const(j as isize).constant());
-                println!("rhgt lte j{} = {:?}", j,self.nodes[right_idx].number.lte_const(j as isize).constant());
-                println!("node gte k{} = {:?}", k,self.nodes[node].number.gte_const(k as isize).constant());
+                println!(
+                    "left gte i{} = {:?}",
+                    i,
+                    self.nodes[left_idx].number.gte_const(i as isize).constant()
+                );
+                println!(
+                    "left lte i{} = {:?}",
+                    i,
+                    self.nodes[left_idx].number.lte_const(i as isize).constant()
+                );
+                println!(
+                    "rhgt gte j{} = {:?}",
+                    j,
+                    self.nodes[right_idx]
+                        .number
+                        .gte_const(j as isize)
+                        .constant()
+                );
+                println!(
+                    "rhgt lte j{} = {:?}",
+                    j,
+                    self.nodes[right_idx]
+                        .number
+                        .lte_const(j as isize)
+                        .constant()
+                );
+                println!(
+                    "node gte k{} = {:?}",
+                    k,
+                    self.nodes[node].number.gte_const(k as isize).constant()
+                );
                 // println!("node lte k{} = {:?}", k,self.nodes[node].number.lte_const(k as isize).constant());
 
                 s.add_clause(vec![
@@ -221,36 +248,51 @@ impl<L: Lit> EqTotalizer<L> {
                     self.nodes[node].number.gte_const(k as isize),
                 ]);
 
-
                 if j > 0 {
-                assert!(self.nodes[left_idx].number.lte_const(i as isize).constant() != Some(true));
+                    assert!(
+                        self.nodes[left_idx].number.lte_const(i as isize).constant() != Some(true)
+                    );
 
-                s.add_clause(vec![
-                    !self.nodes[left_idx].number.lte_const(i as isize),
-                    self.nodes[right_idx].number.gte_const(j as isize),
-                    !self.nodes[node].number.gte_const(k as isize),
-                ]);
-            }
+                    s.add_clause(vec![
+                        !self.nodes[left_idx].number.lte_const(i as isize),
+                        self.nodes[right_idx].number.gte_const(j as isize),
+                        !self.nodes[node].number.gte_const(k as isize),
+                    ]);
+                }
 
                 //  l+r >= i+j && r <= j  =>  l >= i
                 //  l + r >= 1 + 1 && r <= 1  => l >= 1
 
                 if i > 0 {
-                assert!(self.nodes[right_idx].number.lte_const(j as isize).constant() != Some(true));
+                    assert!(
+                        self.nodes[right_idx]
+                            .number
+                            .lte_const(j as isize)
+                            .constant()
+                            != Some(true)
+                    );
 
-                s.add_clause(vec![
-                    self.nodes[left_idx].number.gte_const(i as isize),
-                    !self.nodes[right_idx].number.lte_const(j as isize),
-                    !self.nodes[node].number.gte_const(k as isize),
-                ]);
-            }
+                    s.add_clause(vec![
+                        self.nodes[left_idx].number.gte_const(i as isize),
+                        !self.nodes[right_idx].number.lte_const(j as isize),
+                        !self.nodes[node].number.gte_const(k as isize),
+                    ]);
+                }
 
                 // new_constraints = true;
             }
         }
 
-        println!("Extended node={}  lc{} rc{} tc{}  ->  lc{} rc{} tc{}",
-        node, old_left_bound, old_right_bound, old_bound, new_left_bound, new_right_bound, node_bound);
+        println!(
+            "Extended node={}  lc{} rc{} tc{}  ->  lc{} rc{} tc{}",
+            node,
+            old_left_bound,
+            old_right_bound,
+            old_bound,
+            new_left_bound,
+            new_right_bound,
+            node_bound
+        );
 
         self.nodes[node].left_constraints = new_left_bound;
         self.nodes[node].right_constraints = new_right_bound;
@@ -315,10 +357,9 @@ mod tests {
         eqt.add_literal(&mut s, 1);
         eqt.add_literal(&mut s, 2);
         eqt.add_literal(&mut s, 2);
-        
+
         SatInstance::add_clause(&mut s, vec![eqt.number().gte_const(7)]);
         SatInstance::add_clause(&mut s, vec![eqt.input_number(2).lte_const(2)]);
-
 
         println!("model {:?}", s);
         let m = s.solve().unwrap();
