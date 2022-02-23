@@ -50,6 +50,20 @@ impl DimacsOutput {
         }
         Ok(())
     }
+
+    pub fn num_vars(&self) -> usize {
+        self.next_var as usize
+    }
+    
+    pub fn num_clauses(&self) -> usize {
+        self.clauses.len()
+    }
+}
+
+impl Default for DimacsOutput {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SatInstance<Lit> for DimacsOutput {

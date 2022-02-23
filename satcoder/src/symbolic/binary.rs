@@ -69,7 +69,7 @@ impl<L:Lit + 'static> Binary<L> {
         struct Item<L:Lit> {
             bit: usize,
             val: Bool<L>,
-        };
+        }
         let mut xs = xs.into_iter()
             .map(|(bit, val)| {
                 Item {

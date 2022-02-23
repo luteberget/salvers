@@ -8,7 +8,7 @@ impl<L: Lit, T> FinSet<L, T> {
         Self(xs)
     }
     pub fn new(solver: &mut impl SatInstance<L>, mut xs: Vec<T>) -> Self {
-        if xs.len() == 0 {
+        if xs.is_empty() {
             panic!("Symbolic value cannot be initialized from empty list.");
         } else if xs.len() == 1 {
             FinSet(vec![(true.into(), xs.remove(0))])

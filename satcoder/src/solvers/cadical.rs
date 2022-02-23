@@ -69,6 +69,12 @@ impl Cadical {
     }
 }
 
+impl Default for Cadical {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SatInstance<Lit> for Cadical {
     fn new_var(&mut self) -> Bool {
         let l = Bool::Lit(Lit(self.next_var as i32));
@@ -94,7 +100,7 @@ impl SatInstance<Lit> for Cadical {
 impl SatSolver for Cadical {
     type Lit = Lit;
 
-    fn solve<'a>(&'a mut self) -> SatResult<'a, Self::Lit> {
+    fn solve(&mut self) -> SatResult<Self::Lit> {
         match self.cadical.solve() {
             Some(true) => SatResult::Sat(Box::new(CadicalModel { instance: self })),
             Some(false) => SatResult::Unsat,
@@ -108,10 +114,10 @@ impl SatSolver for Cadical {
 impl SatSolverWithCore for Cadical {
     type Lit = Lit;
 
-    fn solve_with_assumptions<'a>(
-        &'a mut self,
+    fn solve_with_assumptions(
+        &mut self,
         assumptions: impl IntoIterator<Item = Bool>,
-    ) -> SatResultWithCore<'a, Self::Lit> {
+    ) -> SatResultWithCore<Self::Lit> {
         let assumptions = assumptions
             .into_iter()
             .filter_map(|l| match l {

@@ -22,6 +22,10 @@ impl<L: Lit> Unary<L> {
         Unary(lits)
     }
 
+    pub fn as_slice(&self) -> &[Bool<L>] {
+        &self.0
+    }
+
     /// Use the given `Bool` as a one-digit number (zero or one).
     pub fn from_bool(digit: Bool<L>) -> Self {
         Unary(vec![digit])
