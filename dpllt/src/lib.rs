@@ -363,6 +363,11 @@ impl OrderHeap {
     }
 }
 
+impl<Th:Theory> std::fmt::Debug for DplltSolver<Th> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DplltSolver vars:{}, clauses:{}, learnt:{}", self.num_vars(), self.num_clauses(), self.num_learnts())
+    }
+}
 pub struct DplltSolver<Th> {
     pub theory: Th, // TODO how to access?
 
