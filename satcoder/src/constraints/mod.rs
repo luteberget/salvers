@@ -1,6 +1,8 @@
 mod bool;
 pub use self::bool::*;
 
+pub mod mddlinear;
+
 mod totalizer;
 pub use self::totalizer::*;
 
