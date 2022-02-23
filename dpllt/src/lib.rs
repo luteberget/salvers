@@ -1,5 +1,5 @@
-use sattrait;
 use log::{debug, info, trace};
+use sattrait;
 use std::io::Write;
 
 pub mod clausedb;
@@ -12,31 +12,29 @@ pub mod unitprop;
 // theory
 //
 
-#[derive(Debug)]
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum Check {
     Assert,
     Propagate,
     Final,
 }
 
-
 pub struct Refinement {
     last_clause_idx: i32,
     data: Vec<i32>,
-    next_var :i32,
+    next_var: i32,
 }
 
 impl Refinement {
-    pub fn new(next_var :i32) -> Self {
+    pub fn new(next_var: i32) -> Self {
         Refinement {
             last_clause_idx: -1,
             data: Vec::new(),
-	    next_var: next_var,
+            next_var: next_var,
         }
     }
 
-    pub fn clear(&mut self, next_var :i32) {
+    pub fn clear(&mut self, next_var: i32) {
         self.data.clear();
         self.last_clause_idx = -1;
         self.next_var = next_var;
@@ -79,12 +77,12 @@ impl Refinement {
         self.data[self.last_clause_idx as usize] -= (self.data.len() - len0) as i32;
     }
 
-    pub fn add_clause(&mut self, lits :impl IntoIterator<Item = Lit>) {
+    pub fn add_clause(&mut self, lits: impl IntoIterator<Item = Lit>) {
         self.new_clause();
         self.add_clause_lits(lits);
     }
 
-    pub fn add_permanent_clause(&mut self, lits :impl IntoIterator<Item = Lit>) {
+    pub fn add_permanent_clause(&mut self, lits: impl IntoIterator<Item = Lit>) {
         self.new_permanent_clause();
         self.add_permanent_clause_lits(lits);
     }
@@ -100,7 +98,7 @@ impl Refinement {
     }
 
     pub fn next_idx(&self, i: usize) -> usize {
-	i + 1 + self.data_len(i)
+        i + 1 + self.data_len(i)
     }
 
     pub fn get_item<'a>(&mut self, i: usize) -> RefinementItem<'a> {
@@ -110,11 +108,10 @@ impl Refinement {
             let len = self.data_len(i);
             RefinementItem::Clause {
                 permanent: self.data[i] <= -2,
-		lits: unsafe {
-                std::mem::transmute::<& [i32], & [Lit]>(
-                    &self.data[(i + 1)..(i + 1 + len)],
-                )
-            }}
+                lits: unsafe {
+                    std::mem::transmute::<&[i32], &[Lit]>(&self.data[(i + 1)..(i + 1 + len)])
+                },
+            }
         }
     }
 
@@ -125,11 +122,12 @@ impl Refinement {
             let len = self.data_len(i);
             RefinementItemMut::Clause {
                 permanent: self.data[i] <= -2,
-		lits: unsafe {
-                std::mem::transmute::<&mut [i32], &mut [Lit]>(
-                    &mut self.data[(i + 1)..(i + 1 + len)],
-                )
-            }}
+                lits: unsafe {
+                    std::mem::transmute::<&mut [i32], &mut [Lit]>(
+                        &mut self.data[(i + 1)..(i + 1 + len)],
+                    )
+                },
+            }
         }
     }
 }
@@ -143,7 +141,10 @@ pub enum RefinementItem<'a> {
 #[derive(Debug)]
 pub enum RefinementItemMut<'a> {
     Deduced(Lit, u32),
-    Clause { permanent: bool, lits: &'a mut [Lit] },
+    Clause {
+        permanent: bool,
+        lits: &'a mut [Lit],
+    },
 }
 
 //pub enum Refinement {
@@ -162,7 +163,9 @@ pub trait Theory {
     fn explain(&mut self, lit: Lit, lref: u32, refinement: &mut Refinement);
     fn new_decision_level(&mut self);
     fn backtrack(&mut self, n: i32);
-    fn pick_branch_lit(&mut self, suggested :Lit) -> Lit { suggested }
+    fn pick_branch_lit(&mut self, suggested: Lit) -> Lit {
+        suggested
+    }
 }
 
 pub struct NullTheory {}
@@ -186,7 +189,6 @@ impl SatSolver {
 }
 
 // TODO &&, ||
-
 
 type VMap<T> = Vec<T>;
 
@@ -226,7 +228,7 @@ impl OrderHeap {
             self.heap.push(Var(ns[i]));
         }
 
-        let mut i = (self.heap.len() / 2 ) as i32 - 1;
+        let mut i = (self.heap.len() / 2) as i32 - 1;
         while i >= 0 {
             self.percolate_down(i as i32, act);
             i -= 1;
@@ -346,7 +348,7 @@ impl OrderHeap {
     //    }
     //}
 
-    pub fn peek(&self) -> Option<Var> { 
+    pub fn peek(&self) -> Option<Var> {
         self.heap.get(0).cloned()
     }
 
@@ -509,7 +511,9 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     pub fn value(&self, lit: Lit) -> bool {
-        if !self.ok { panic!("no model available"); }
+        if !self.ok {
+            panic!("no model available");
+        }
         let value = self.model[lit.var().idx()];
         assert!(value != LBOOL_UNDEF);
         (value == LBOOL_TRUE) ^ lit.sign()
@@ -523,13 +527,14 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     pub fn get_clauses(&self) -> impl Iterator<Item = &[Lit]> {
-        self.clauses.iter().map(move |i| self.clause_database.get_clause(*i).1)
+        self.clauses
+            .iter()
+            .map(move |i| self.clause_database.get_clause(*i).1)
     }
 
     pub fn new(theory: Th) -> Self {
         DplltSolver {
             theory: theory,
-
 
             #[cfg(feature = "trace")]
             tracelog_file: None,
@@ -593,7 +598,9 @@ impl<Th: Theory> DplltSolver<Th> {
         }
     }
 
-   pub fn new_var_default(&mut self) -> Lit { self.new_var(LBOOL_UNDEF, true) }
+    pub fn new_var_default(&mut self) -> Lit {
+        self.new_var(LBOOL_UNDEF, true)
+    }
 
     pub fn new_var(&mut self, user_polarity: LBool, decision_var: bool) -> Lit {
         let var = if let Some(var) = self.free_vars.pop() {
@@ -762,7 +769,7 @@ impl<Th: Theory> DplltSolver<Th> {
                 if Self::assigns_lit_value(assigns, *l) == LBOOL_TRUE || *l == prev.inverse() {
                     already_sat = true;
                 }
-                (prev, prev=*l).0 != *l && Self::assigns_lit_value(assigns, *l) != LBOOL_FALSE
+                (prev, prev = *l).0 != *l && Self::assigns_lit_value(assigns, *l) != LBOOL_FALSE
             });
 
             if already_sat {
@@ -1017,7 +1024,6 @@ impl<Th: Theory> DplltSolver<Th> {
         mut conflict_clause: ClauseHeaderOffset,
         out_learnt: &mut Vec<Lit>,
     ) -> i32 {
-
         #[cfg(feature = "profiler")]
         let _p = hprof::enter("analyze");
 
@@ -1104,7 +1110,7 @@ impl<Th: Theory> DplltSolver<Th> {
         }
         self.stats.tot_literals += out_learnt.len();
 
-        trace!("ANALYZE SIMPLIFIED to  {:?}", out_learnt);
+        trace!("ANALYZE SIMPLIFIED to {:?}", out_learnt);
 
         // find correct backtrack level
         let out_level = if out_learnt.len() == 1 {
@@ -1471,7 +1477,9 @@ impl<Th: Theory> DplltSolver<Th> {
             .explain(lit, rref, &mut self.theory_refinement_buffer);
         //println!("  ** theory-explain {:?}", self.theory_refinement_buffer.get_item_mut(0));
 
-        if let RefinementItemMut::Clause { permanent: _, lits } = self.theory_refinement_buffer.get_item_mut(0) {
+        if let RefinementItemMut::Clause { permanent: _, lits } =
+            self.theory_refinement_buffer.get_item_mut(0)
+        {
             Self::sort_theory_lemma(&self.assigns, &self.vardata, lits);
             assert!(lits[0] == lit);
             let (mut i, mut j) = (0, 0);
@@ -1492,12 +1500,17 @@ impl<Th: Theory> DplltSolver<Th> {
                 // We must have at least two literals to add a clause. Add something to the clause
                 // that is unlikely to become true. If it should become true anyway, the refinement
                 // will happen again.
-                if let Some(l) = self.trail.iter().filter(|x| x.var() != self.add_tmp[0].var()).next() {
-                    self.add_tmp.push(l.inverse()); 
-                } 
+                if let Some(l) = self
+                    .trail
+                    .iter()
+                    .filter(|x| x.var() != self.add_tmp[0].var())
+                    .next()
+                {
+                    self.add_tmp.push(l.inverse());
+                }
                 println!("ADD TMP HACK {:?}", self.add_tmp);
             }
-            assert!(self.add_tmp.len() > 1); 
+            assert!(self.add_tmp.len() > 1);
             // TODO  fix too short clause by adding a "global true lit" in solver constructor.
             let new_cref = self.clause_database.add_clause(&self.add_tmp, true);
             self.vardata[var.idx()].reason = new_cref;
@@ -1647,7 +1660,7 @@ impl<Th: Theory> DplltSolver<Th> {
             self.trail.len()
         );
         //println!(" simplify1");
-            //eprintln!("prop from simplify");
+        //eprintln!("prop from simplify");
         if !self.ok || self.propagate() != CLAUSE_NONE {
             //println!("SIMPLIFTY SET OK=FALSE");
             self.ok = false;
@@ -1734,7 +1747,7 @@ impl<Th: Theory> DplltSolver<Th> {
                 return bool_prop;
             }
             assert!(self.qhead == self.trail.len()); // boolean prop finished without conflict
-            //self.clean_order_heap();
+                                                     //self.clean_order_heap();
             let are_all_assigned = self.order_heap.is_empty();
             let check = if are_all_assigned {
                 Check::Final
@@ -1745,7 +1758,8 @@ impl<Th: Theory> DplltSolver<Th> {
             //println!("propagating {:?}", new_lits);
             self.theory_qhead = self.trail.len();
             self.theory_refinement_buffer.clear(self.next_var);
-            self.theory.check(check, new_lits, &mut self.theory_refinement_buffer);
+            self.theory
+                .check(check, new_lits, &mut self.theory_refinement_buffer);
             //println!("vars left before refinement: {}", self.order_heap.heap.len());
             let theory_conflict = self.theory_refinement();
             //println!("vars left after refinement: {}", self.order_heap.heap.len());
@@ -1759,7 +1773,9 @@ impl<Th: Theory> DplltSolver<Th> {
                 self.theory_final_checked = true;
             }
 
-            if !(self.qhead < self.trail.len()) { break; }
+            if !(self.qhead < self.trail.len()) {
+                break;
+            }
         }
 
         CLAUSE_NONE
@@ -1794,10 +1810,9 @@ impl<Th: Theory> DplltSolver<Th> {
     }
 
     fn theory_refinement(&mut self) -> ClauseHeaderOffset {
-
         // add new variables
         while self.theory_refinement_buffer.next_var > self.next_var {
-           self.new_var_default();
+            self.new_var_default();
         }
 
         //let mut output = false;
@@ -1820,7 +1835,7 @@ impl<Th: Theory> DplltSolver<Th> {
                             self.theory_refinement_buffer.data.len() > pre_len
                                 && self.theory_refinement_buffer.data[pre_len] != -1
                         ); // must have added a clause
-                        //println!("  ** th-prop-conflict {:?}", self.theory_refinement_buffer.get_item(pre_len));
+                           //println!("  ** th-prop-conflict {:?}", self.theory_refinement_buffer.get_item(pre_len));
                     } else {
                         //println!("  ** th-prop-already-set");
                         // lit already set, ignore
@@ -1866,8 +1881,8 @@ impl<Th: Theory> DplltSolver<Th> {
                 i = self.theory_refinement_buffer.next_idx(i);
             }
 
-	    if backtrack_level < self.trail_lim.len() as i32 {
-              self.cancel_until(backtrack_level);
+            if backtrack_level < self.trail_lim.len() as i32 {
+                self.cancel_until(backtrack_level);
             }
         }
 
@@ -1885,9 +1900,9 @@ impl<Th: Theory> DplltSolver<Th> {
 
                         if permanent {
                             self.clauses.push(new_cref);
-			} else {
+                        } else {
                             self.learnts.push(new_cref);
-			}
+                        }
 
                         self.attach_clause(new_cref);
                     }
@@ -1919,10 +1934,14 @@ impl<Th: Theory> DplltSolver<Th> {
         }
     }
 
-    fn search(&mut self, nof_conflicts: i32, interrupt :&mut impl FnMut()->bool) -> Result<LBool,()> {
+    fn search(
+        &mut self,
+        nof_conflicts: i32,
+        interrupt: &mut impl FnMut() -> bool,
+    ) -> Result<LBool, ()> {
         #[cfg(feature = "profiler")]
         let _p = hprof::enter("sat search");
-        
+
         debug!("-> SEARCH(nof_conflicts={})", nof_conflicts);
         assert!(self.ok);
         let mut conflict_c = 0;
@@ -1931,11 +1950,11 @@ impl<Th: Theory> DplltSolver<Th> {
 
         loop {
             //println!("search loop iter: start");
-//eprintln!("prop from search loop");
+            //eprintln!("prop from search loop");
             let conflict_clause = self.propagate();
             //assert!( self.lemmas.len() == 0 ); // ?
             if conflict_clause != CLAUSE_NONE {
-            //println!("search loop iter: conflict");
+                //println!("search loop iter: conflict");
                 trace!("found conflict");
                 // found conflict
                 self.stats.conflicts += 1;
@@ -1958,63 +1977,61 @@ impl<Th: Theory> DplltSolver<Th> {
                         }
                         write!(f, "\n").unwrap();
 
-                        write!( f, "backtrack_level {}\n", backtrack_level).unwrap();
-
+                        write!(f, "backtrack_level {}\n", backtrack_level).unwrap();
                     }
                 }
 
                 {
+                    #[cfg(feature = "profiler")]
+                    let _p = hprof::enter("sat backtrack");
 
-        #[cfg(feature = "profiler")]
-        let _p = hprof::enter("sat backtrack");
+                    self.cancel_until(backtrack_level);
+                    if learnt_clause.len() == 1 {
+                        self.unchecked_enqueue(learnt_clause[0], CLAUSE_NONE);
+                    } else {
+                        let new_cref = self.clause_database.add_clause(&learnt_clause, true);
+                        //eprintln!("LEARN {:?}", learnt_clause);
+                        self.learnts.push(new_cref);
+                        self.attach_clause(new_cref);
+                        self.clause_bump_activity(new_cref);
+                        self.unchecked_enqueue(learnt_clause[0], new_cref);
+                    }
 
-                self.cancel_until(backtrack_level);
-                if learnt_clause.len() == 1 {
-                    self.unchecked_enqueue(learnt_clause[0], CLAUSE_NONE);
-                } else {
-                    let new_cref = self.clause_database.add_clause(&learnt_clause, true);
-//eprintln!("LEARN {:?}", learnt_clause);
-                    self.learnts.push(new_cref);
-                    self.attach_clause(new_cref);
-                    self.clause_bump_activity(new_cref);
-                    self.unchecked_enqueue(learnt_clause[0], new_cref);
-                }
+                    self.var_decay_activity();
+                    self.clause_decay_activity();
 
-                self.var_decay_activity();
-                self.clause_decay_activity();
+                    self.learntsize_adjust_cnt -= 1;
+                    if self.learntsize_adjust_cnt == 0 {
+                        self.learntsize_adjust_confl *= self.params.learntsize_adjust_inc;
+                        self.learntsize_adjust_cnt = self.learntsize_adjust_confl as i32;
+                        self.max_learnts *= self.params.learntsize_inc;
 
-                self.learntsize_adjust_cnt -= 1;
-                if self.learntsize_adjust_cnt == 0 {
-                    self.learntsize_adjust_confl *= self.params.learntsize_adjust_inc;
-                    self.learntsize_adjust_cnt = self.learntsize_adjust_confl as i32;
-                    self.max_learnts *= self.params.learntsize_inc;
-
-                    info!(
-                        " > cfl{:>9} | vars {:>6} clauses {:>7} lits {:>6}",
-                        self.stats.conflicts,
-                        (self.stats.dec_vars as isize)
-                            - if self.trail_lim.len() == 0 {
-                                self.trail.len() as isize
-                            } else {
-                                self.trail_lim[0] as isize
-                            },
-                        self.clauses.len(),
-                        self.stats.clauses_literals,
-                    );
-                    info!(
-                        " -> learnt lim {:>8} clauses {:>8} lit/cl {:>8}",
-                        self.max_learnts as isize,
-                        self.learnts.len(),
-                        (self.stats.learnts_literals as f64 / self.learnts.len() as f64) as isize
-                    );
-                }
+                        info!(
+                            " > cfl{:>9} | vars {:>6} clauses {:>7} lits {:>6}",
+                            self.stats.conflicts,
+                            (self.stats.dec_vars as isize)
+                                - if self.trail_lim.len() == 0 {
+                                    self.trail.len() as isize
+                                } else {
+                                    self.trail_lim[0] as isize
+                                },
+                            self.clauses.len(),
+                            self.stats.clauses_literals,
+                        );
+                        info!(
+                            " -> learnt lim {:>8} clauses {:>8} lit/cl {:>8}",
+                            self.max_learnts as isize,
+                            self.learnts.len(),
+                            (self.stats.learnts_literals as f64 / self.learnts.len() as f64)
+                                as isize
+                        );
+                    }
                 }
             } else {
-
-        #[cfg(feature = "profiler")]
+                #[cfg(feature = "profiler")]
                 let _p = hprof::enter("sat decide");
 
-            //println!("search loop iter: no conflict");
+                //println!("search loop iter: no conflict");
                 // no conflict found
                 trace!("no conflict found");
 
@@ -2045,7 +2062,7 @@ impl<Th: Theory> DplltSolver<Th> {
                 if self.learnts.len() as f64 - self.trail.len() as f64 >= self.max_learnts {
                     //eprintln!("reduce_db");
                     //
-        #[cfg(feature = "profiler")]
+                    #[cfg(feature = "profiler")]
                     let _p = hprof::enter("sat reduce db");
                     self.reduce_db();
                 }
@@ -2093,11 +2110,11 @@ impl<Th: Theory> DplltSolver<Th> {
                 self.theory.new_decision_level();
                 self.unchecked_enqueue(next, CLAUSE_NONE);
 
-		// minisat removed from the heap in pick_branch_lit. We don't
-		// do that because the theory might override the selection. If
-		// we actually assigned to the minimum element of the heap
-		// (positive or negative), we remove it here.
-		self.clean_order_heap();
+                // minisat removed from the heap in pick_branch_lit. We don't
+                // do that because the theory might override the selection. If
+                // we actually assigned to the minimum element of the heap
+                // (positive or negative), we remove it here.
+                self.clean_order_heap();
             }
         }
     }
@@ -2126,7 +2143,7 @@ impl<Th: Theory> DplltSolver<Th> {
         return y.powf(seq as f64);
     }
 
-    pub fn set_assumptions(&mut self, a :impl IntoIterator<Item = Lit>) {
+    pub fn set_assumptions(&mut self, a: impl IntoIterator<Item = Lit>) {
         self.assumptions.clear();
         self.assumptions.extend(a);
     }
@@ -2135,7 +2152,7 @@ impl<Th: Theory> DplltSolver<Th> {
         self.solve_interrupt(&mut || false)
     }
 
-    pub fn solve_interrupt(&mut self, interrupt :&mut impl FnMut()->bool) -> LBool {
+    pub fn solve_interrupt(&mut self, interrupt: &mut impl FnMut() -> bool) -> LBool {
         #[cfg(feature = "profiler")]
         let _p = hprof::enter("sat solve");
         debug!("-> SOLVE");
@@ -2168,20 +2185,28 @@ impl<Th: Theory> DplltSolver<Th> {
                 self.params.restart_inc.powf(curr_restarts as f64)
             };
 
-            match self.search((rest_base * self.params.restart_first as f64) as i32, interrupt) {
-                Ok(s) => { 
+            match self.search(
+                (rest_base * self.params.restart_first as f64) as i32,
+                interrupt,
+            ) {
+                Ok(s) => {
                     status = s;
-                },
-                Err(()) => { 
+                }
+                Err(()) => {
                     status = LBOOL_UNDEF;
                     break;
-                 }
+                }
             }
             curr_restarts += 1;
         }
 
         if self.verbosity >= 1 {
-            info!("* solve finished (vars={}, clauses={}, learnts={})", self.num_vars(), self.num_clauses(), self.num_learnts());
+            info!(
+                "* solve finished (vars={}, clauses={}, learnts={})",
+                self.num_vars(),
+                self.num_clauses(),
+                self.num_learnts()
+            );
         }
 
         if status == LBOOL_TRUE {
@@ -2273,24 +2298,26 @@ pub fn solver_from_dimacs_filename(filename: &str) -> SatSolver {
                 trace!("l0 var {:?}", c.lits().iter().nth(0).unwrap().var());
                 trace!("l0 sign {:?}", c.lits().iter().nth(0).unwrap().sign());
                 s.prop.add_clause(c.lits().iter().map(|l| {
-                    Lit::new(Var(l.var().to_u64() as i32 - 1), l.sign() == dimacs::Sign::Neg)
+                    Lit::new(
+                        Var(l.var().to_u64() as i32 - 1),
+                        l.sign() == dimacs::Sign::Neg,
+                    )
                 }));
             }
         }
-        _ => { panic!("not a cnf file"); }
+        _ => {
+            panic!("not a cnf file");
+        }
     }
     s
 }
 
-
-
 impl sattrait::Lit for Lit {}
-impl<T :Theory> sattrait::SatInstance<Lit> for DplltSolver<T> {
-  fn new_var(&mut self) -> Lit { self.new_var_default() }
-  fn add_clause(&mut self, c: impl IntoIterator<Item = impl Into<Lit>>) { 
-    self.add_clause(c.into_iter().map(|x| x.into()));
+impl<T: Theory> sattrait::SatInstance<Lit> for DplltSolver<T> {
+    fn new_var(&mut self) -> Lit {
+        self.new_var_default()
+    }
+    fn add_clause(&mut self, c: impl IntoIterator<Item = impl Into<Lit>>) {
+        self.add_clause(c.into_iter().map(|x| x.into()));
+    }
 }
-
-}
-
-
