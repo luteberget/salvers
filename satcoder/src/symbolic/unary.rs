@@ -280,6 +280,24 @@ impl<L: Lit> Unary<L> {
             Unary::sum(sat, terms)
         }
     }
+
+    pub fn add_sequential_lit(&self, s: &mut impl SatInstance<L>, other: Bool<L>) -> Self {
+        match other {
+            l @ Bool::Lit(_) => {
+                let prev = &self.0;
+                let next = vec![s.new_var(); self.0.len() + 1];
+                for i in 0..self.0.len() {
+                    SatInstance::add_clause(s, vec![!prev[i], next[i]]);
+                    SatInstance::add_clause(s, vec![l, prev[i - 1], !next[i]]);
+                    SatInstance::add_clause(s, vec![!l, !prev[i], next[i + 1]]);
+                    SatInstance::add_clause(s, vec![prev[i], !next[i + 1]]);
+                }
+                Unary(next)
+            }
+            Bool::Const(true) => self.add_const(1),
+            Bool::Const(false) => self.clone(),
+        }
+    }
 }
 
 //impl ModelOrd for Unary {
