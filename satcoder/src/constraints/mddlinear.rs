@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{prelude::Unary, Bool, Lit, SatInstance};
 use itertools::Itertools;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LinearConstraintLte<L: Lit> {
     pub terms: Vec<(i32, Unary<L>)>,
     pub rhs: i32,
