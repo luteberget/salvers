@@ -1,6 +1,5 @@
-use dpllt::*;
-use sattrait;
 pub use dpllt::Lit;
+use dpllt::*;
 use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -50,14 +49,14 @@ pub struct IdlEdge {
 }
 
 impl IdlGraph {
-    pub fn new() -> Self { IdlGraph 
-            {
-                conflict: Vec::new(),
-                nodes: Vec::new(),
-                edges: Vec::new(),
-                queue: VecDeque::new(),
-                update_dists: Vec::new(),
-            }
+    pub fn new() -> Self {
+        IdlGraph {
+            conflict: Vec::new(),
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            queue: VecDeque::new(),
+            update_dists: Vec::new(),
+        }
     }
 
     pub fn disable_edge(&mut self, del_id: u32) -> bool {
@@ -79,9 +78,9 @@ impl IdlGraph {
         }
         edge.from *= -1;
 
-	if self.nodes[edge.from as usize].dist + edge.weight <= self.nodes[edge.to as usize].dist {
-	    return true;
-	}
+        if self.nodes[edge.from as usize].dist + edge.weight <= self.nodes[edge.to as usize].dist {
+            return true;
+        }
 
         // update dists
         self.update_dists.clear();
@@ -175,7 +174,13 @@ impl InnerIdl {
         v
     }
 
-    fn add_constraint(&mut self, lit: Option<Lit>, DVar(x): DVar, DVar(y): DVar, k: Domain) -> bool {
+    fn add_constraint(
+        &mut self,
+        lit: Option<Lit>,
+        DVar(x): DVar,
+        DVar(y): DVar,
+        k: Domain,
+    ) -> bool {
         let _g = hprof::enter("idl add constraint");
         let edge_idx = self.graph.edges.len() as u32;
         self.graph.edges.push(IdlEdge {
@@ -258,7 +263,7 @@ impl Theory for InnerIdl {
 /// DPLL(T) solver with integer difference logic theory.
 pub struct IdlSolver {
     prop: DplltSolver<InnerIdl>,
-    was_sat :bool,
+    was_sat: bool,
 }
 
 impl IdlSolver {
@@ -320,70 +325,141 @@ impl IdlSolver {
     /// ```
     pub fn add_diff(&mut self, lit: Option<Lit>, x: DVar, y: DVar, k: Domain) {
         let ok = self.inner().add_constraint(lit, x, y, k);
-        if !ok { self.prop.add_clause(std::iter::empty()); }
+        if !ok {
+            self.prop.add_clause(std::iter::empty());
+        }
     }
 
     pub fn solve<'a>(&'a mut self) -> Result<Model<'a>, ()> {
         self.prop.set_assumptions(std::iter::empty());
         self.was_sat = self.prop.solve() == LBOOL_TRUE;
         if self.was_sat {
-           Ok(Model { solver: self })
+            Ok(Model { solver: self })
         } else {
-           Err(())
+            Err(())
         }
     }
 
-    pub fn solve_with_assumptions<'a>(&'a mut self, a: &[Lit]) -> Result<Model<'a>, Box<dyn Iterator<Item = Lit> + 'a>> {
+    pub fn solve_with_assumptions<'a>(
+        &'a mut self,
+        a: &[Lit],
+    ) -> Result<Model<'a>, Box<dyn Iterator<Item = Lit> + 'a>> {
         self.prop.set_assumptions(a.iter().cloned());
         self.was_sat = self.prop.solve() == LBOOL_TRUE;
         if self.was_sat {
-          Ok(Model { solver: self })
-	} else { 
-          Err(Box::new(self.prop.conflict.iter().map(|l| !*l)))
+            Ok(Model { solver: self })
+        } else {
+            Err(Box::new(self.prop.conflict.iter().map(|l| !*l)))
         }
     }
 
     pub fn get_int_value(&mut self, DVar(x): DVar) -> Domain {
         let idl = &self.prop.theory;
-	idl.graph.nodes[x as usize].dist -  idl.graph.nodes[1].dist
+        idl.graph.nodes[x as usize].dist - idl.graph.nodes[1].dist
     }
 
-    pub fn get_bool_value(&self, lit :Lit) -> bool {
+    pub fn get_bool_value(&self, lit: Lit) -> bool {
         self.prop.value(lit)
     }
 }
 
-impl sattrait::SatSolver<Lit> for IdlSolver {
-  fn solve<'a>(&'a mut self, assumptions :impl IntoIterator<Item = impl Into<Lit>>) -> Result<Box<dyn sattrait::Model<Lit> + 'a>, Box<dyn Iterator<Item = Lit> + 'a>> {
-    match self.solve_with_assumptions(&assumptions.into_iter().map(|x| x.into()).collect::<Vec<_>>()) {
-      Ok(m) => Ok(Box::new(m)),
-      Err(c) => Err(c),
-    }
-  }
+impl satcoder::SatSolver for IdlSolver {
+    type Lit = dpllt::Lit;
 
-  fn result<'a>(&'a self) -> Result<Box<dyn sattrait::Model<Lit> + 'a>, Box<dyn Iterator<Item = Lit> + 'a>> {
-    if self.was_sat {
-      Ok(Box::new(Model{ solver: self}))
-    } else {
-      Err(Box::new(self.prop.conflict.iter().map(|l| !*l)))
+    fn solve<'a>(&'a mut self) -> satcoder::SatResult<'a, Self::Lit> {
+        todo!()
     }
-  }
 }
 
+impl satcoder::SatSolverWithCore for IdlSolver {
+    type Lit = dpllt::Lit;
+
+    fn solve_with_assumptions<'a>(
+        &'a mut self,
+        assumptions: impl IntoIterator<Item = satcoder::Bool<Self::Lit>>,
+    ) -> satcoder::SatResultWithCore<'a, Self::Lit> {
+        match self.solve_with_assumptions(
+            &assumptions
+                .into_iter()
+                .map(|x| x.lit().unwrap())
+                .collect::<Vec<_>>(),
+        ) {
+            Ok(m) => satcoder::SatResultWithCore::Sat(Box::new(m)),
+            Err(c) => satcoder::SatResultWithCore::Unsat(c.collect::<Vec<_>>().into_boxed_slice()),
+        }
+    }
+}
 
 pub struct Model<'a> {
-  solver :&'a IdlSolver,
+    solver: &'a IdlSolver,
+}
+
+impl<'a> Model<'a> {
+    pub fn get_int_value(&self, DVar(x): DVar) -> Domain {
+        let idl = &self.solver.prop.theory;
+        idl.graph.nodes[x as usize].dist - idl.graph.nodes[1].dist
+    }
+}
+
+impl<'a> satcoder::SatModel for Model<'a> {
+    type Lit = dpllt::Lit;
+
+    fn lit_value(&self, l: &Lit) -> bool {
+        self.solver.get_bool_value(*l)
+    }
+}
+
+impl satcoder::SatInstance<Lit> for IdlSolver {
+    fn new_var(&mut self) -> satcoder::Bool<Lit> {
+        satcoder::Bool::Lit(self.new_bool())
+    }
+    fn add_clause<IL: Into<satcoder::Bool<Lit>>, I: IntoIterator<Item = IL>>(&mut self, clause: I) {
+        self.add_clause(
+            &clause
+                .into_iter()
+                .map(|l| l.into().lit().unwrap())
+                .collect::<Vec<_>>(),
+        );
+    }
 }
 
 impl<'a> sattrait::Model<Lit> for Model<'a> {
-  fn value(&self, l :Lit) -> bool { self.solver.get_bool_value(l) }
+    fn value(&self, l: Lit) -> bool {
+        self.solver.get_bool_value(l)
+    }
 }
 
 impl sattrait::SatInstance<Lit> for IdlSolver {
-  fn new_var(&mut self) -> Lit { self.new_bool() }
-  fn add_clause(&mut self, c :impl IntoIterator<Item = impl Into<Lit>>) {
-    self.add_clause(&c.into_iter().map(|l| l.into()).collect::<Vec<_>>());
-  }
+    fn new_var(&mut self) -> Lit {
+        self.new_bool()
+    }
+    fn add_clause(&mut self, c: impl IntoIterator<Item = impl Into<Lit>>) {
+        self.add_clause(&c.into_iter().map(|l| l.into()).collect::<Vec<_>>());
+    }
 }
 
-
+impl sattrait::SatSolver<Lit> for IdlSolver {
+    fn solve<'a>(
+        &'a mut self,
+        assumptions: impl IntoIterator<Item = impl Into<Lit>>,
+    ) -> Result<Box<dyn sattrait::Model<Lit> + 'a>, Box<dyn Iterator<Item = Lit> + 'a>> {
+        match self.solve_with_assumptions(
+            &assumptions
+                .into_iter()
+                .map(|x| x.into())
+                .collect::<Vec<_>>(),
+        ) {
+            Ok(m) => Ok(Box::new(m)),
+            Err(c) => Err(c),
+        }
+    }
+    fn result<'a>(
+        &'a self,
+    ) -> Result<Box<dyn sattrait::Model<Lit> + 'a>, Box<dyn Iterator<Item = Lit> + 'a>> {
+        if self.was_sat {
+            Ok(Box::new(Model { solver: self }))
+        } else {
+            Err(Box::new(self.prop.conflict.iter().map(|l| !*l)))
+        }
+    }
+}

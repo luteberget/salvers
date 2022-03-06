@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 dpllt = { path = "../dpllt" }
 smallvec = "1.3"
+satcoder = { path = "../satcoder" }
 sattrait = { path = "../sattrait" }
 hprof = "0.1"
 
