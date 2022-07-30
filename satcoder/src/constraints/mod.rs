@@ -10,4 +10,4 @@ pub use self::totalizer::*;
 mod cumulativediff;
 pub use self::cumulativediff::{CumulativeDiff, UpDown};
 
-pub use self::eqtotalizer::EqTotalizer;
+// pub use self::eqtotalizer::EqTotalizer;

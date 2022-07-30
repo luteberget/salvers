@@ -85,3 +85,56 @@ impl<'a> SatModel for ::minisat::Model<'a> {
         ::minisat::Model::lit_value(self, l)
     }
 }
+
+pub struct MiniSatRandomPolarity {
+    solver: ::minisat::Solver,
+}
+
+impl MiniSatRandomPolarity {
+    pub fn new() -> Self {
+        Self {
+            solver: minisat::Solver::new(),
+        }
+    }
+}
+
+impl Default for MiniSatRandomPolarity {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SatInstance<Lit> for MiniSatRandomPolarity {
+    fn new_var(&mut self) -> Bool {
+        use std::hash::Hasher;
+        let lit = self.solver.new_lit();
+        let mut s = std::collections::hash_map::DefaultHasher::new();
+        lit.hash(&mut s);
+        let pol = s.finish() % 2 == 0;
+        self.solver.set_polarity(lit, pol);
+        Bool::Lit(lit)
+    }
+
+    fn add_clause<IL: Into<Bool>, I: IntoIterator<Item = IL>>(&mut self, clause: I) {
+        SatInstance::add_clause(&mut self.solver, clause)
+    }
+}
+
+impl SatSolverWithCore for MiniSatRandomPolarity {
+    type Lit = Lit;
+
+    fn solve_with_assumptions(
+        &mut self,
+        assumptions: impl IntoIterator<Item = crate::Bool<Self::Lit>>,
+    ) -> SatResultWithCore<'_, Self::Lit> {
+        SatSolverWithCore::solve_with_assumptions(&mut self.solver, assumptions)
+    }
+}
+
+impl SatSolver for MiniSatRandomPolarity {
+    type Lit = Lit;
+
+    fn solve(&mut self) -> SatResult<'_, Self::Lit> {
+        SatSolver::solve(&mut self.solver)
+    }
+}
